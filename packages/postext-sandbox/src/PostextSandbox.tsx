@@ -38,6 +38,7 @@ import { setOutputProfileBaseUrl } from './print/printSetup.js';
 import { setDesignUrls } from './designs/designSources.js';
 import { watchDesignTrial } from './designs/designTrial.js';
 import { SandboxWebMcp } from './webmcp/SandboxWebMcp.js';
+import { HostBridge } from './bridge/hostBridge.js';
 
 // three.js loads with the Folio tab, not with the sandbox.
 const FolioViewport = lazy(() => import('./viewport/folio/FolioViewport.js').then((m) => ({ default: m.FolioViewport })));
@@ -387,6 +388,7 @@ export function PostextSandbox({
   homeUrl,
   homeLink,
   webmcp = true,
+  onBridgeReady,
 }: PostextSandboxProps) {
   // Before any child asks for a profile.
   setOutputProfileBaseUrl(outputProfileBaseUrl);
@@ -414,6 +416,7 @@ export function PostextSandbox({
         onMarkdownChange={onMarkdownChange}
       >
         {webmcp && <SandboxWebMcp />}
+        {onBridgeReady && <HostBridge onReady={onBridgeReady} />}
         <PortalProvider>
         <TooltipProvider>
           <SandboxLayout

@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "../db/client";
 import * as schema from "../db/schema";
+import { createBundle, openBundleZip, zipBundle } from "postext/bundle";
 import { fromBundle } from "./bundle";
 import { sha256Hex } from "./model";
 import type { AssetData, BookRepository, BookWrite } from "./model";
@@ -242,5 +243,37 @@ describe("版", () => {
       ok: false,
       reason: "not_found",
     });
+  });
+
+  it("Sandbox が .postext に足す組版結果と表紙は資産として保存しない", async () => {
+    const created = await createBundle({
+      name: "試験の本",
+      locale: "ja",
+      chapters: [{ title: "第一章", markdown: "# 第一章\n\n本文" }],
+      config: {},
+      resources: [bitmapResource("img.png")] as never,
+      files: new Map([["img.png", new Uint8Array(pngBytes)]]),
+      thumbnail: { data: new Uint8Array(pngBytes), mime: "image/png" },
+    });
+    const zip = openBundleZip(created.bytes);
+    const withCaches = zipBundle({
+      ...Object.fromEntries([...zip.files]),
+      "layouts.json": new TextEncoder().encode("{}"),
+      "layouts.ja.json": new TextEncoder().encode("{}"),
+    });
+
+    const sent = [...openBundleZip(withCaches).files.keys()];
+    expect(sent).toContain("layouts.json");
+    expect(sent).toContain("layouts.ja.json");
+    expect(sent.some((f) => f.startsWith("thumbnail"))).toBe(true);
+
+    const parsed = await fromBundle(withCaches);
+    expect(parsed.assets.map((a) => a.path)).toEqual(["resources/fig-1.png"]);
+
+    const book = await createBook(repo, parsed);
+    const saved = await saveBook(repo, book.id, 0, parsed);
+    expect(saved).toEqual({ ok: true, revision: 1 });
+    const got = await getBook(repo, book.id);
+    expect(got.ok && got.book.assets.map((a) => a.path)).toEqual(["resources/fig-1.png"]);
   });
 });

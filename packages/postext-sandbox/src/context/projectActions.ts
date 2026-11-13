@@ -29,7 +29,7 @@ import { sessionCoverAttempts, coverTargetKey, thumbnailIfMissing } from '../cov
 import { recordSharedConfig, initialSharedConfig } from '../editions/configLayers.js';
 import { bundleCoverImage } from '../covers/renderCover.js';
 import { bookOfState, newRecord, ownEditions, copyThumbnail, adoptPresetThumbnail, withEditionsOf, ownContent, adoptLoadedPreset, storeThumbnail, bookFromLoaded, presetThumbnailBytes, PRESET_THUMBNAIL_ID, storedCurrentLayouts, localizedOf, BUNDLE_COVER_ID } from './projectActions/copies.js';
-import type { ProjectActionDeps, ProjectActions } from './projectActions/types.js';
+import type { DuplicateSource, ProjectActionDeps, ProjectActions } from './projectActions/types.js';
 import { cancelCompileFor, startCompile } from '../export/compileStore.js';
 
 export type { ProjectActionDeps, DuplicateSource, ProjectActions } from './projectActions/types.js';
@@ -386,8 +386,7 @@ export function createProjectActions(deps: ProjectActionDeps): ProjectActions {
       return true;
     });
 
-  const exportProject: ProjectActions['exportProject'] = (target) =>
-    run(async () => {
+  const buildProjectBundle = async (target?: DuplicateSource): Promise<{ zip: Uint8Array; name: string; warnings: string[] }> => {
       const s = deps.getState();
       let meta: { id: string; name: string; description?: string; locale?: string };
       let content: BundleContent;
@@ -478,12 +477,19 @@ export function createProjectActions(deps: ProjectActionDeps): ProjectActions {
       }
 
       const built = await buildBundleFiles(meta, content, { readBlob, readFont });
-      const zip = zipBundle(built.files);
-      downloadBytes(zip, `${slugify(meta.name) || 'project'}${POSTEXT_EXTENSION}`, POSTEXT_MIME);
-      if (built.warnings.length > 0) {
-        dispatch({ type: 'SET_PROJECT_NOTICE', payload: deps.labels().projectExportWarnings.replace('__list__', built.warnings.join('; ')) });
+      return { zip: zipBundle(built.files), name: meta.name, warnings: built.warnings };
+  };
+
+  const exportProject: ProjectActions['exportProject'] = (target) =>
+    run(async () => {
+      const { zip, name, warnings } = await buildProjectBundle(target);
+      downloadBytes(zip, `${slugify(name) || 'project'}${POSTEXT_EXTENSION}`, POSTEXT_MIME);
+      if (warnings.length > 0) {
+        dispatch({ type: 'SET_PROJECT_NOTICE', payload: deps.labels().projectExportWarnings.replace('__list__', warnings.join('; ')) });
       }
     });
+
+  const bundleProject: ProjectActions['bundleProject'] = async (target) => (await deps.withGcSuspended(() => buildProjectBundle(target))).zip;
 
   // Not run(): the other books stay at hand while one compiles.
   const compile: ProjectActions['compile'] = async (id, format, opts = {}) => {
@@ -572,5 +578,5 @@ export function createProjectActions(deps: ProjectActionDeps): ProjectActions {
       applyRecord({ ...merged, config }, parts);
     });
 
-  return { activate, create, duplicate, rename, remove, importBundle, importBundleBytes, switchEdition, addEdition, exportProject, compile, setThumbnail, adoptGeneratedThumbnail, renameFrameInEditions, resetToSource };
+  return { activate, create, duplicate, rename, remove, importBundle, importBundleBytes, switchEdition, addEdition, exportProject, bundleProject, compile, setThumbnail, adoptGeneratedThumbnail, renameFrameInEditions, resetToSource };
 }
