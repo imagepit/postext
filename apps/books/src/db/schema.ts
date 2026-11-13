@@ -21,6 +21,10 @@ export const books = pgTable("books", {
   config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
   // 画像などの資源の定義。本体のバイト列は assets にある。
   resources: jsonb("resources").$type<Record<string, unknown>[]>().notNull().default([]),
+  // 主言語。NULL は多言語対応前の書籍で、読むときは先頭の章の言語を主言語とみなす。
+  locale: text("locale"),
+  // 多言語の書籍で言語に共通の設定。
+  sharedConfig: jsonb("shared_config").$type<Record<string, unknown>>(),
   // 保存のたびに1増える。呼び出し側が読んだ値と照合して競合を見つける。
   revision: integer("revision").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -40,6 +44,25 @@ export const chapters = pgTable(
     markdown: text("markdown").notNull(),
   },
   (t) => [unique("chapters_book_position").on(t.bookId, t.position)],
+);
+
+// 主言語以外の版。主言語の題名・設定・資源は books にある。
+export const bookEditions = pgTable(
+  "book_editions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bookId: uuid("book_id")
+      .notNull()
+      .references(() => books.id, { onDelete: "cascade" }),
+    locale: text("locale").notNull(),
+    position: integer("position").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
+    resources: jsonb("resources").$type<Record<string, unknown>[]>().notNull().default([]),
+    start: jsonb("start").$type<Record<string, unknown>>(),
+  },
+  (t) => [unique("book_editions_book_locale").on(t.bookId, t.locale)],
 );
 
 export const assets = pgTable(

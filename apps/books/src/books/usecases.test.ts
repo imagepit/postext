@@ -5,9 +5,9 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "../db/client";
 import * as schema from "../db/schema";
-import { createBundle, openBundleZip, zipBundle } from "postext/bundle";
-import { fromBundle } from "./bundle";
-import { sha256Hex } from "./model";
+import { createBundle, openBundle, openBundleZip, zipBundle } from "postext/bundle";
+import { fromBundle, toBundle } from "./bundle";
+import { parseBookWrite, sha256Hex } from "./model";
 import type { AssetData, BookRepository, BookWrite } from "./model";
 import { createPgRepository } from "./repository";
 import {
@@ -275,5 +275,150 @@ describe("版", () => {
     expect(saved).toEqual({ ok: true, revision: 1 });
     const got = await getBook(repo, book.id);
     expect(got.ok && got.book.assets.map((a) => a.path)).toEqual(["resources/fig-1.png"]);
+  });
+});
+
+const bilingual = (suffix = ""): BookWrite => ({
+  title: "日本語の題名",
+  config: { marker: "ja-config" },
+  resources: [],
+  locale: "ja",
+  chapters: [
+    { title: "第一章", locale: "ja", markdown: `# 第一章\n\n日本語の本文${suffix}` },
+    { title: "第二章", locale: "ja", markdown: `# 第二章\n\n日本語の続き${suffix}` },
+    { title: "Chapter one", locale: "en", markdown: `# Chapter one\n\nEnglish body${suffix}` },
+  ],
+  editions: [
+    {
+      locale: "en",
+      name: "English title",
+      description: "An English edition",
+      config: { marker: "en-config" },
+      resources: [],
+    },
+  ],
+});
+
+describe("多言語の書籍", () => {
+  it("2言語で作成すると、両言語の章・題名・設定を取得できる", async () => {
+    const created = await createBook(repo, bilingual());
+    const got = await getBook(repo, created.id);
+    if (!got.ok) throw new Error("not found");
+    expect(got.book.locale).toBe("ja");
+    expect(got.book.title).toBe("日本語の題名");
+    expect(got.book.config).toEqual({ marker: "ja-config" });
+    expect(got.book.chapters.map((c) => [c.locale, c.title])).toEqual([
+      ["ja", "第一章"],
+      ["ja", "第二章"],
+      ["en", "Chapter one"],
+    ]);
+    expect(got.book.editions).toEqual([
+      {
+        locale: "en",
+        name: "English title",
+        description: "An English edition",
+        config: { marker: "en-config" },
+        resources: [],
+      },
+    ]);
+  });
+
+  it("版を作って両言語を保存し直し、復元すると両言語が版の内容へ戻る", async () => {
+    const book = await createBook(repo, bilingual());
+    const version = await createVersion(repo, book.id, "v1");
+    if (!version.ok) throw new Error("version not created");
+
+    const changed = bilingual(" 変更");
+    changed.title = "変更後の題名";
+    changed.editions![0]!.name = "Changed title";
+    expect(await saveBook(repo, book.id, 0, changed)).toEqual({ ok: true, revision: 1 });
+    const mid = await getBook(repo, book.id);
+    expect(mid.ok && mid.book.editions?.[0]?.name).toBe("Changed title");
+
+    expect(await restoreVersion(repo, book.id, version.version.id, 1)).toEqual({ ok: true, revision: 2 });
+    const got = await getBook(repo, book.id);
+    if (!got.ok) throw new Error("not found");
+    expect(got.book.title).toBe("日本語の題名");
+    expect(got.book.editions?.map((e) => e.name)).toEqual(["English title"]);
+    expect(got.book.editions?.[0]?.config).toMatchObject({ marker: "en-config" });
+    expect(got.book.chapters.map((c) => [c.locale, c.markdown])).toEqual([
+      ["ja", "# 第一章\n\n日本語の本文"],
+      ["ja", "# 第二章\n\n日本語の続き"],
+      ["en", "# Chapter one\n\nEnglish body"],
+    ]);
+  });
+
+  it("createBundle の localized で作った .postext を取り込み、書き出すと各言語が読める", async () => {
+    const made = await createBundle({
+      name: "日本語の題名",
+      locale: "ja",
+      chapters: [{ title: "第一章", markdown: "# 第一章\n\n日本語" }],
+      localized: {
+        en: { name: "English title", chapters: [{ title: "One", markdown: "# One\n\nEnglish" }] },
+        fr: { name: "Titre", chapters: [{ title: "Un", markdown: "# Un\n\nFrancais" }] },
+      },
+    });
+    const parsed = await fromBundle(made.bytes);
+    expect(parsed.locale).toBe("ja");
+    expect(parsed.editions?.map((e) => e.locale)).toEqual(["en", "fr"]);
+    expect(parsed.chapters.map((c) => c.locale)).toEqual(["ja", "en", "fr"]);
+
+    const book = await createBook(repo, parsed);
+    const full = await repo.getWithAssetData(book.id);
+    const bytes = await toBundle(full!);
+    const ja = await openBundle(bytes);
+    expect(ja.name).toBe("日本語の題名");
+    expect(ja.chapters.map((c) => c.markdown)).toEqual(["# 第一章\n\n日本語"]);
+    const en = await openBundle(bytes, { locale: "en" });
+    expect(en.name).toBe("English title");
+    expect(en.chapters.map((c) => c.markdown)).toEqual(["# One\n\nEnglish"]);
+    const fr = await openBundle(bytes, { locale: "fr" });
+    expect(fr.name).toBe("Titre");
+    expect(fr.chapters.map((c) => c.markdown)).toEqual(["# Un\n\nFrancais"]);
+  });
+
+  it("locale と editions を省いた単一言語の書籍は従来どおり往復する", async () => {
+    const book = await newBook();
+    expect(book.editions).toEqual([]);
+    const version = await createVersion(repo, book.id, "");
+    if (!version.ok) throw new Error("version not created");
+    const bytes = await repo.getVersionBundle(book.id, version.version.id);
+    const opened = await openBundle(bytes!);
+    expect(opened.locales).toBeUndefined();
+    const back = await fromBundle(bytes!);
+    expect(back.editions).toEqual([]);
+    expect(back.chapters).toEqual([{ title: "第一章", locale: "ja", markdown: "# 第一章\n\nはじめの本文" }]);
+  });
+
+  it("locale が NULL の書籍は先頭の章の言語を主言語として返す", async () => {
+    const book = await newBook();
+    await pool.query("update books set locale = null, shared_config = null where id = $1", [book.id]);
+    const got = await getBook(repo, book.id);
+    expect(got.ok && got.book.locale).toBe("ja");
+    expect(got.ok && got.book.editions).toEqual([]);
+    await saveBook(repo, book.id, 0, draft("保存し直した本文"));
+    const row = await pool.query("select locale from books where id = $1", [book.id]);
+    expect(row.rows[0].locale).toBe("ja");
+  });
+});
+
+describe("書き込みの検証", () => {
+  const base = { title: "t", chapters: [{ title: "a", locale: "ja", markdown: "x" }] };
+  it("多言語の項目を省くと従来どおりの値になる", () => {
+    const parsed = parseBookWrite(base);
+    expect(parsed.ok && parsed.value).toEqual({ ...base, config: {}, resources: [] });
+  });
+  it("版の言語が重複・主言語と同じ・章の言語に未知があると拒否する", () => {
+    const edition = { locale: "en", name: "n", config: {}, resources: [] };
+    expect(parseBookWrite({ ...base, editions: [edition, edition] }).ok).toBe(false);
+    expect(parseBookWrite({ ...base, editions: [{ ...edition, locale: "ja" }] }).ok).toBe(false);
+    expect(parseBookWrite({ ...base, editions: [{ ...edition, locale: "fr" }] }).ok).toBe(true);
+    expect(
+      parseBookWrite({
+        ...base,
+        chapters: [...base.chapters, { title: "b", locale: "de", markdown: "y" }],
+        editions: [edition],
+      }).ok,
+    ).toBe(false);
   });
 });
