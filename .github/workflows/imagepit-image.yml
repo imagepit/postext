@@ -1,0 +1,47 @@
+name: IMAGEPIT book app image
+
+on:
+  push:
+    branches:
+      - "imagepit-v*"
+  pull_request:
+    branches:
+      - "imagepit-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: imagepit-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: imagepit/postext:ci-${{ github.sha }}
+
+jobs:
+  build:
+    if: github.repository == 'imagepit/postext'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build amd64 image
+        run: |
+          docker buildx build --platform linux/amd64 --load -f Dockerfile.imagepit \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$IMAGE" .
+
+      - name: Start the image and check its pages
+        run: |
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE")" = linux/amd64
+          trap 'docker logs books-check || true; docker rm -f books-check >/dev/null 2>&1 || true' EXIT
+          docker run -d --name books-check --platform linux/amd64 -p 127.0.0.1::3000 "$IMAGE"
+          port="$(docker port books-check 3000/tcp)"
+          curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-all-errors \
+            "http://$port/api/health" | grep -q '"status":"ok"'
+          curl --fail --silent --show-error "http://$port/" | grep -q '<html lang="ja"'
+          test "$(docker exec books-check id -u)" != 0

@@ -1,0 +1,4 @@
+/* The Sandbox reads its colours and fonts from the host's CSS variables and
+   ships Tailwind classes in its source. The upstream site already defines
+   both, so the book app takes them from there instead of keeping a copy. */
+@import "../../../web/src/app/globals.css";
