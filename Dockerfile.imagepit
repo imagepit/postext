@@ -4,9 +4,6 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN corepack enable
 WORKDIR /repo
 COPY . .
-# esbuild（vitest と drizzle-kit が使う）の build script が未承認だと pnpm 12 は install を失敗させる。
-# 実行時に不要なので不許可として宣言する。pnpm-workspace.yaml 自体は変えない。
-RUN printf '  esbuild: false\n' >> pnpm-workspace.yaml
 RUN pnpm install --frozen-lockfile
 RUN pnpm exec turbo run build --filter=books
 # standalone 出力には migrator が入らないので、pg と drizzle-orm ごと1ファイルにまとめて持ち込む。
