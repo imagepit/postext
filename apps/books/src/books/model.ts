@@ -20,12 +20,29 @@ export interface AssetData extends AssetMeta {
   bytes: Buffer;
 }
 
-/** 書籍の中身。版の復元と保存はこの単位で書き戻す。 */
+/** 主言語以外の言語の版。主言語の題名・設定・資源は BookContent 本体にある。 */
+export interface BookEdition {
+  locale: string;
+  name: string;
+  description?: string;
+  config: Record<string, unknown>;
+  resources: Record<string, unknown>[];
+  start?: Record<string, unknown>;
+}
+
+/**
+ * 書籍の中身。版の復元と保存はこの単位で書き戻す。
+ * chapters は全言語の章で、主言語の章を先に並べる。locale などを省くと単一言語として扱う。
+ */
 export interface BookContent {
   title: string;
   config: Record<string, unknown>;
   resources: Record<string, unknown>[];
   chapters: ChapterContent[];
+  /** 主言語。省くと先頭の章の言語。 */
+  locale?: string;
+  sharedConfig?: Record<string, unknown> | null;
+  editions?: BookEdition[];
 }
 
 export interface Book extends BookContent {
@@ -130,7 +147,7 @@ function parseAsset(input: unknown, index: number): Parsed<AssetData> {
 /** PUT と POST の本文を検証する。保存は全置き換えなので、章は1つ以上を要求する（.postext は章なしで作れない）。 */
 export function parseBookWrite(input: unknown): Parsed<BookWrite> {
   if (!isRecord(input)) return fail("body must be a JSON object");
-  const { title, config = {}, resources = [], chapters, assets } = input;
+  const { title, config = {}, resources = [], chapters, assets, locale, sharedConfig, editions } = input;
   if (typeof title !== "string" || title.trim() === "") return fail("title must be a non-empty string");
   if (!isRecord(config)) return fail("config must be an object");
   if (!Array.isArray(resources) || !resources.every(isRecord)) return fail("resources must be an array of objects");
@@ -149,6 +166,45 @@ export function parseBookWrite(input: unknown): Parsed<BookWrite> {
     resources: resources as Record<string, unknown>[],
     chapters: parsedChapters,
   };
+  if (locale !== undefined && (typeof locale !== "string" || locale === "")) {
+    return fail("locale must be a non-empty string");
+  }
+  if (sharedConfig !== undefined && sharedConfig !== null && !isRecord(sharedConfig)) {
+    return fail("sharedConfig must be an object or null");
+  }
+  if (editions !== undefined && !Array.isArray(editions)) return fail("editions must be an array");
+  if (locale !== undefined || sharedConfig !== undefined || editions !== undefined) {
+    const primary = locale ?? parsedChapters[0]!.locale;
+    const parsedEditions: BookEdition[] = [];
+    const locales = new Set<string>([primary]);
+    for (const [i, e] of (editions ?? []).entries()) {
+      if (!isRecord(e)) return fail(`editions[${i}] must be an object`);
+      if (typeof e.locale !== "string" || e.locale === "") return fail(`editions[${i}].locale must be a non-empty string`);
+      if (locales.has(e.locale)) return fail(`editions[${i}].locale is duplicated or equals the primary locale`);
+      locales.add(e.locale);
+      if (typeof e.name !== "string") return fail(`editions[${i}].name must be a string`);
+      if (e.description !== undefined && typeof e.description !== "string") return fail(`editions[${i}].description must be a string`);
+      if (!isRecord(e.config)) return fail(`editions[${i}].config must be an object`);
+      if (!Array.isArray(e.resources) || !e.resources.every(isRecord)) return fail(`editions[${i}].resources must be an array of objects`);
+      if (e.start !== undefined && e.start !== null && !isRecord(e.start)) return fail(`editions[${i}].start must be an object`);
+      parsedEditions.push({
+        locale: e.locale,
+        name: e.name,
+        ...(e.description !== undefined ? { description: e.description } : {}),
+        config: e.config,
+        resources: e.resources as Record<string, unknown>[],
+        ...(e.start ? { start: e.start } : {}),
+      });
+    }
+    if (editions !== undefined) {
+      for (const [i, c] of parsedChapters.entries()) {
+        if (!locales.has(c.locale)) return fail(`chapters[${i}].locale must be the primary locale or an edition locale`);
+      }
+    }
+    value.locale = primary;
+    if (sharedConfig !== undefined) value.sharedConfig = sharedConfig;
+    if (editions !== undefined) value.editions = parsedEditions;
+  }
   if (assets !== undefined) {
     if (!Array.isArray(assets)) return fail("assets must be an array");
     const parsedAssets: AssetData[] = [];

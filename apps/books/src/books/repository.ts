@@ -1,12 +1,13 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { assets, bookVersions, books, chapters } from "../db/schema";
+import { assets, bookEditions, bookVersions, books, chapters } from "../db/schema";
 import { nextRevision } from "./model";
 import type {
   AssetData,
   AssetMeta,
   Book,
   BookContent,
+  BookEdition,
   BookRepository,
   BookSummary,
   BookWithAssetData,
@@ -31,6 +32,7 @@ async function insertChildren(tx: Tx, bookId: string, content: BookWrite): Promi
       content.chapters.map((c, position) => ({ bookId, position, ...c })),
     );
   }
+  await insertEditions(tx, bookId, content);
   if (content.assets && content.assets.length > 0) {
     await tx.insert(assets).values(
       content.assets.map((a) => ({
@@ -43,6 +45,39 @@ async function insertChildren(tx: Tx, bookId: string, content: BookWrite): Promi
       })),
     );
   }
+}
+
+async function insertEditions(tx: Tx, bookId: string, content: BookWrite): Promise<void> {
+  const editions = content.editions ?? [];
+  if (editions.length === 0) return;
+  await tx.insert(bookEditions).values(
+    editions.map((e, position) => ({
+      bookId,
+      position,
+      locale: e.locale,
+      name: e.name,
+      description: e.description ?? null,
+      config: e.config,
+      resources: e.resources,
+      start: e.start ?? null,
+    })),
+  );
+}
+
+async function readEditions(db: Db | Tx, bookId: string): Promise<BookEdition[]> {
+  const rows = await db
+    .select()
+    .from(bookEditions)
+    .where(eq(bookEditions.bookId, bookId))
+    .orderBy(asc(bookEditions.position));
+  return rows.map((e) => ({
+    locale: e.locale,
+    name: e.name,
+    ...(e.description !== null ? { description: e.description } : {}),
+    config: e.config,
+    resources: e.resources,
+    ...(e.start !== null ? { start: e.start } : {}),
+  }));
 }
 
 async function readChapters(db: Db | Tx, bookId: string): Promise<ChapterContent[]> {
@@ -59,14 +94,22 @@ function snapshot<T>(db: Db, run: (tx: Tx) => Promise<T>): Promise<T> {
   return db.transaction(run, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
-function contentOf(row: typeof books.$inferSelect, chapterRows: ChapterContent[]): BookContent {
+async function readContent(tx: Tx, row: typeof books.$inferSelect): Promise<BookContent> {
+  const chapterRows = await readChapters(tx, row.id);
   return {
     title: row.title,
     config: row.config,
     resources: row.resources,
     chapters: chapterRows,
+    // 多言語対応前の書籍は locale が NULL。先頭の章の言語を主言語とみなす。
+    ...((row.locale ?? chapterRows[0]?.locale) ? { locale: row.locale ?? chapterRows[0]!.locale } : {}),
+    sharedConfig: row.sharedConfig,
+    editions: await readEditions(tx, row.id),
   };
 }
+
+const primaryLocale = (content: BookContent): string | null =>
+  content.locale ?? content.chapters[0]?.locale ?? null;
 
 export function createPgRepository(db: Db): BookRepository {
   return {
@@ -74,7 +117,13 @@ export function createPgRepository(db: Db): BookRepository {
       return db.transaction(async (tx) => {
         const [row] = await tx
           .insert(books)
-          .values({ title: content.title, config: content.config, resources: content.resources })
+          .values({
+            title: content.title,
+            config: content.config,
+            resources: content.resources,
+            locale: primaryLocale(content),
+            sharedConfig: content.sharedConfig ?? null,
+          })
           .returning();
         await insertChildren(tx, row!.id, content);
         const assetMetas = await readAssetMetas(tx, row!.id);
@@ -83,7 +132,7 @@ export function createPgRepository(db: Db): BookRepository {
           revision: row!.revision,
           createdAt: row!.createdAt,
           updatedAt: row!.updatedAt,
-          ...contentOf(row!, await readChapters(tx, row!.id)),
+          ...(await readContent(tx, row!)),
           assets: assetMetas,
         } satisfies Book;
       });
@@ -110,7 +159,7 @@ export function createPgRepository(db: Db): BookRepository {
           revision: row.revision,
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,
-          ...contentOf(row, await readChapters(tx, id)),
+          ...(await readContent(tx, row)),
           assets: await readAssetMetas(tx, id),
         };
       });
@@ -136,7 +185,7 @@ export function createPgRepository(db: Db): BookRepository {
         return {
           id: row.id,
           revision: row.revision,
-          ...contentOf(row, await readChapters(tx, id)),
+          ...(await readContent(tx, row)),
           assets: data,
         };
       });
@@ -152,6 +201,8 @@ export function createPgRepository(db: Db): BookRepository {
             title: content.title,
             config: content.config,
             resources: content.resources,
+            locale: primaryLocale(content),
+            sharedConfig: content.sharedConfig ?? null,
             revision: nextRevision(baseRevision),
             updatedAt: sql`now()`,
           })
@@ -167,6 +218,7 @@ export function createPgRepository(db: Db): BookRepository {
             : { ok: false as const, reason: "not_found" as const };
         }
         await tx.delete(chapters).where(eq(chapters.bookId, id));
+        await tx.delete(bookEditions).where(eq(bookEditions.bookId, id));
         if (content.assets) await tx.delete(assets).where(eq(assets.bookId, id));
         await insertChildren(tx, id, content);
         return { ok: true as const, revision: updated[0]!.revision };
