@@ -6,11 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.4",
     "next": "16.4.5",
     "next-intl": "^4.14.9",
+    "pg": "^8.23.1",
     "postext": "workspace:*",
     "postext-sandbox": "workspace:*",
     "react": "19.3.1",
@@ -19,9 +23,13 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "drizzle-kit": "^0.31.11",
+    "esbuild": "^0.28.2",
     "tailwindcss": "^4.3.3",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^5.1.0"
   }
 }

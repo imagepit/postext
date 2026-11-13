@@ -21,3 +21,4 @@ allowBuilds:
   '@swc/core': false
   msw: false
   unrs-resolver: false
+  esbuild: false
