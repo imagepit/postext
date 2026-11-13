@@ -3,6 +3,7 @@ export { DEFAULT_MARKDOWN_EN, DEFAULT_MARKDOWN_ES, DEFAULT_MARKDOWN_CA, DEFAULT_
 export { preloadConfigFonts, loadFont, getConfigFontFamilies } from './controls/fonts/fontLoader.js';
 export { BUILTIN_PRESET_ID } from './presets/index.js';
 export type { PresetSourceSpec, PresetManifest, PresetIndex } from './presets/index.js';
+export type { SandboxBookBridge } from './bridge/hostBridge.js';
 export type {
   PostextSandboxProps,
   HashBundleResolver,

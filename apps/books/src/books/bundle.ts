@@ -5,6 +5,10 @@ import type { AssetData, BookContent, ChapterContent } from "./model";
 
 const DEFAULT_LOCALE = "en";
 
+// Sandbox が書き出しのたびに .postext へ足すキャッシュ（組版結果と表紙）。書籍の内容ではなく、
+// 資産として保存すると保存のたびに増え、版の .postext にも混ざる。
+const LAYOUTS_FILE = /^layouts(\.[^/]+)?\.json$/;
+
 export type BundleBook = BookContent & { assets: AssetData[] };
 
 // 資産のパスは、設定と資源が参照する fileId と同じ値で保存している。
@@ -34,6 +38,7 @@ export async function fromBundle(bytes: Uint8Array): Promise<BundleBook> {
   const assets: AssetData[] = [];
   for (const [path, data] of opened.files) {
     if (path === MANIFEST_FILE || chapterFiles.has(path)) continue;
+    if (LAYOUTS_FILE.test(path) || path === opened.thumbnail) continue;
     const buffer = Buffer.from(data);
     assets.push({
       kind: fontFiles.has(path) ? "font" : "resource",

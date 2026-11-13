@@ -75,6 +75,9 @@ export interface ProjectActions {
    *  already has that language. */
   addEdition: (id: string, locale: string) => Promise<boolean>;
   exportProject: (target?: DuplicateSource) => Promise<void>;
+  /** The `.postext` archive `exportProject` would download, handed back
+   *  instead; no busy state, so a host can call it on every save. */
+  bundleProject: (target?: DuplicateSource) => Promise<Uint8Array>;
   /** Compile a project to one PDF, HTML or EPUB 3 file (#1526), in the
    *  edition `locale` (the one it opens with by default), laid out apart
    *  from the book on screen (`export/compileBook.ts`); an EPUB in

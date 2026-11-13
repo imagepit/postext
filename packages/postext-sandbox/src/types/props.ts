@@ -2,6 +2,7 @@ import type { PostextConfig } from 'postext';
 import type { ReactNode } from 'react';
 import type { SandboxLabels } from './labels.js';
 import type { PresetSourceSpec } from '../presets/types.js';
+import type { SandboxBookBridge } from '../bridge/hostBridge.js';
 
 export type PanelId = 'projects' | 'chapters' | 'markdown' | 'config' | 'resources' | 'fonts' | 'warnings';
 /** The preview tabs, in the order the bar shows them: Canvas, PDF, Folio,
@@ -53,6 +54,10 @@ export interface PostextSandboxProps {
    *  Canvas's language switcher and side by side (#1011), e.g. a Cookbook
    *  recipe captured in several languages. */
   hashBundleEditions?: Record<string, HashBundleEditions>;
+  /** Hands the host the means to open a `.postext` as the book on screen,
+   *  take the book back as one and hear about edits (`SandboxBookBridge`),
+   *  for a host that keeps the books in a store of its own. */
+  onBridgeReady?: (bridge: SandboxBookBridge) => void;
   onConfigChange?: (config: PostextConfig) => void;
   onMarkdownChange?: (markdown: string) => void;
   /** Hand an agent in the browser the Sandbox's own tools through WebMCP
