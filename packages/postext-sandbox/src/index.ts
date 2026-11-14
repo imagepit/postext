@@ -12,3 +12,5 @@ export type {
   PanelId,
   ViewportTab,
 } from './types/index.js';
+export { setSavedDesignStorage } from './designs/designStore.js';
+export type { SavedDesign, SavedDesignSummary, SavedDesignStorage } from './designs/designStore.js';
