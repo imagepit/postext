@@ -22,10 +22,11 @@ describe("git-basics の変換", () => {
   });
 
   it("3. note / syntax / step は callout になり、閉じの ::: はそのまま", () => {
-    expect(lines).toContain(':::callout{type="step"}');
-    expect(lines).toContain(':::callout{type="syntax" title="ローカルリポジトリの初期化"}');
-    expect(lines).toContain(':::callout{type="note" title=".gitフォルダについて"}');
-    expect(lines.filter((l) => l === ":::")).toHaveLength(3);
+    expect(lines).toContain(':::callout{type="step" label="作業手順"}');
+    expect(lines).toContain(':::callout{type="syntax" label="ローカルリポジトリの初期化"}');
+    expect(lines).toContain(':::callout{type="note" label=".gitフォルダについて"}');
+    // callout の閉じ 3 つ + step-item 段落の閉じ 2 つ
+    expect(lines.filter((l) => l === ":::")).toHaveLength(5);
   });
 
   it("4. 画像は単独の ::resource 行になり、alt と幅が集まる", () => {
@@ -89,8 +90,11 @@ describe("git-basics の変換", () => {
   });
 
   it("8. 続きを持つ番号付き項目は1項目ずつの番号付きリストになり、続きは項目の外へ出る", () => {
-    const i1 = lines.indexOf("1. フォルダの作成");
-    const i2 = lines.indexOf("2. Gitリポジトリを作成");
+    // :::step の中なので番号付きリストではなく、丸数字の step-item 段落になる
+    const i1 = lines.indexOf("① フォルダの作成") + 1;
+    const i2 = lines.indexOf("② Gitリポジトリを作成") + 1;
+    expect(lines[i1 - 2]).toBe(':::paragraphs{style="step-item"}');
+    expect(lines[i1]).toBe(":::");
     expect(i1).toBeGreaterThan(-1);
     expect(i2).toBeGreaterThan(i1);
     // 項目の後ろに続きが字下げなしで並ぶ
@@ -128,16 +132,42 @@ describe("個別の規則", () => {
   });
 
   it("title に二重引用符があれば一重引用符で囲み、両方あれば印刷用の引用符にする", () => {
-    expect(convert(':::note He said "hi"\nx\n:::\n').markdown).toContain(`title='He said "hi"'`);
-    expect(convert(`:::note a "b" 'c'\nx\n:::\n`).markdown).toContain(`title="a ”b” 'c'"`);
+    expect(convert(':::note He said "hi"\nx\n:::\n').markdown).toContain(`label='He said "hi"'`);
+    expect(convert(`:::note a "b" 'c'\nx\n:::\n`).markdown).toContain(`label="a ”b” 'c'"`);
   });
 
   it(":::caution も callout になる（Git基礎研修の「チーム開発でのGitの運用」が使う）", () => {
-    expect(convert(":::caution 注意点\nx\n:::\n").markdown).toContain(':::callout{type="caution" title="注意点"}');
+    expect(convert(":::caution 注意点\nx\n:::\n").markdown).toContain(':::callout{type="caution" label="注意点"}');
   });
 
-  it("title なしの :::step は title 属性を付けない", () => {
-    expect(convert(":::step\nx\n:::\n").markdown).toBe(':::callout{type="step"}\nx\n\n:::\n');
+  it("title なしの :::step は label=\"作業手順\" を付け、題があればその題を使う", () => {
+    expect(convert(":::step\nx\n:::\n").markdown).toBe(':::callout{type="step" label="作業手順"}\nx\n\n:::\n');
+    expect(convert(":::step 準備\nx\n:::\n").markdown).toContain(':::callout{type="step" label="準備"}');
+  });
+
+  it(":::step の番号付き項目は丸数字の step-item 段落になり、続きの本文は項目の外へ出る", () => {
+    const md = convert(":::step\n\n1. フォルダの作成\n\n   本文です。\n\n2. 次の手順\n:::\n\n1. 通常の項目\n2. もう一つ\n").markdown;
+    expect(md).toContain(':::paragraphs{style="step-item"}\n① フォルダの作成\n:::');
+    expect(md).toContain(':::paragraphs{style="step-item"}\n② 次の手順\n:::');
+    expect(md).toContain("\n本文です。\n");
+    expect(md).not.toMatch(/^1\. フォルダの作成/m);
+    // 囲みの外の番号付きリストはそのまま
+    expect(md).toContain("1. 通常の項目\n2. もう一つ");
+  });
+
+  it("21 番目以降の手順項目は (21) になる", () => {
+    const items = Array.from({ length: 21 }, (_, k) => `${k + 1}. s${k + 1}\n`).join("");
+    const md = convert(`:::step\n${items}:::\n`).markdown;
+    expect(md).toContain("⑳ s20");
+    expect(md).toContain("(21) s21");
+  });
+
+  it("callout の題は title ではなく label 属性になる（note / syntax / caution、波括弧は全角にする）", () => {
+    for (const kind of ["note", "syntax", "caution"]) {
+      const md = convert(`:::${kind} 題 {x}\nx\n:::\n`).markdown;
+      expect(md).toContain(`:::callout{type="${kind}" label="題 ｛x｝"}`);
+      expect(md).not.toContain("title=");
+    }
   });
 
   it("未対応の ::: ブロックはテキストのまま残して警告する", () => {
@@ -178,6 +208,23 @@ describe("個別の規則", () => {
     const r = convert("| a | b | c |\n|:--|:-:|--:|\n| 1 \\| 2 | x |\n");
     expect(r.tables[0]!.align).toEqual(["left", "center", "right"]);
     expect(r.tables[0]!.rows).toEqual([["1 | 2", "x", ""]]);
+  });
+
+  it("表の直前の \\: キャプション（Outline の書き出し）を表のキャプションにし、本文から消す", () => {
+    const r = convert("説明です。\n\n\\: マージ結果の種類\n\n| a | b |\n|---|---|\n| 1 | 2 |\n");
+    expect(r.tables[0]!.caption).toBe("マージ結果の種類");
+    expect(r.markdown).toBe(`説明です。\n\n::resource{id="outline-table-${DOC.slice(0, 8)}-1"}\n`);
+  });
+
+  it("表の直後の : キャプションも表のキャプションにする", () => {
+    const r = convert("| a | b |\n|---|---|\n| 1 | 2 |\n\n: 前提となる環境\n\n次の段落。\n");
+    expect(r.tables[0]!.caption).toBe("前提となる環境");
+    expect(r.markdown).not.toContain("前提となる環境");
+    expect(r.markdown).toContain("次の段落。");
+  });
+
+  it("キャプションのない表は caption を持たない", () => {
+    expect(convert("| a |\n|---|\n| 1 |\n").tables[0]!.caption).toBeUndefined();
   });
 
   it("箇条書き項目の続きも項目の外へ出し、警告する", () => {

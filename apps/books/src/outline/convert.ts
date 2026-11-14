@@ -17,7 +17,11 @@ export interface ConvertedTable {
   align: (TableAlign | undefined)[];
   header: string[];
   rows: string[][];
+  /** 表の直前か直後の `: キャプション`（Outline は `\: キャプション` と書き出す）。 */
+  caption?: string;
 }
+
+const TABLE_CAPTION = /^\\?:\s+(\S.*)$/;
 
 export interface ConvertResult {
   markdown: string;
@@ -39,6 +43,8 @@ interface Ctx {
   tables: ConvertedTable[];
   warnings: string[];
   warned: Set<string>;
+  /** :::step の内側にいる間は true。番号付き項目を番号付きリストにせず、丸数字の段落にする。 */
+  inStep: boolean;
 }
 
 const CALLOUT_TYPES = new Set(["note", "syntax", "step", "caution"]);
@@ -52,6 +58,13 @@ const OTHER_IMAGE = /!\[[^\]]*\]\([^)]*\)/;
 const TEMPLATE_TAG = /\{\{[^}]*\}\}/g;
 const TABLE_SEPARATOR = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 const ITALIC_ONLY = /^\s*\*([^*\s](?:[^*]*[^*\s])?)\*\s*$/;
+
+const CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";
+
+/** 1〜20 は丸数字、それ以外は「(21)」。 */
+export function circledNumber(n: number): string {
+  return n >= 1 && n <= 20 ? CIRCLED[n - 1]! : `(${n})`;
+}
 
 const warn = (ctx: Ctx, message: string, once = false): void => {
   if (once) {
@@ -257,7 +270,9 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       if (CALLOUT_TYPES.has(name)) {
         const title = (dm[2] ?? "").trim();
         blank();
-        out.push(`:::callout{type="${name}"${title ? ` title=${attrValue(title)}` : ""}}`);
+        const labelText = title || (name === "step" ? "作業手順" : "");
+        out.push(`:::callout{type="${name}"${labelText ? ` label=${attrValue(labelText)}` : ""}}`);
+        if (name === "step") ctx.inStep = true;
         i++;
         continue;
       }
@@ -267,6 +282,7 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       continue;
     }
     if (trimmed === ":::") {
+      ctx.inStep = false;
       blank();
       out.push(":::");
       blank();
@@ -279,6 +295,22 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       let j = i + 2;
       while (j < lines.length && lines[j]!.trim().startsWith("|")) j++;
       const id = parseTable(ctx, lines.slice(i, j));
+      // キャプションは表の直前（空行を挟んでもよい）か直後の1行に書かれる。
+      let last = out.length - 1;
+      while (last >= 0 && out[last] === "") last--;
+      const before = last >= 0 ? TABLE_CAPTION.exec(out[last]!.trim()) : null;
+      if (before) {
+        ctx.tables.at(-1)!.caption = before[1]!.trim();
+        out.splice(last);
+      } else {
+        let k = j;
+        while (k < lines.length && lines[k]!.trim() === "") k++;
+        const after = k < lines.length ? TABLE_CAPTION.exec(lines[k]!.trim()) : null;
+        if (after) {
+          ctx.tables.at(-1)!.caption = after[1]!.trim();
+          lines.splice(k, 1);
+        }
+      }
       blank();
       out.push(`::resource{id="${id}"}`);
       blank();
@@ -304,9 +336,29 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       const itemImages = splitImages(ctx, itemText);
       const head = itemImages ? itemImages.flatMap((s) => ("text" in s ? [s.text] : [])).join("").trim() : itemText;
       const headText = cleanInline(ctx, head);
+      const stepItem = !!om && ctx.inStep && leadingSpaces(line) === 0;
       const simple =
+        !stepItem &&
         !itemImages &&
         cont.every((l) => l.trim() === "" || (NESTED_LIST_LINE.test(l) && !IMAGE_ONE.test(l) && !l.includes("|")));
+      if (stepItem) {
+        // 手順の項目は番号付きリストにせず、丸数字で始まる段落（段落スタイル step-item）にする。
+        const dedentedStep = cont.map((l) => l.slice(Math.min(markerWidth, leadingSpaces(l))));
+        const stepImages = (itemImages ?? []).flatMap((s) => ("resourceId" in s ? [`::resource{id="${s.resourceId}"}`] : []));
+        blank();
+        out.push(':::paragraphs{style="step-item"}', `${circledNumber(Number(om![1]))} ${headText.trim() || "画像"}`, ":::");
+        blank();
+        for (const r of stepImages) {
+          out.push(r);
+          blank();
+        }
+        ctx.inStep = false;
+        out.push(...processLines(dedentedStep, ctx));
+        ctx.inStep = true;
+        blank();
+        i = end + 1;
+        continue;
+      }
       if (cont.length === 0 && !itemImages) {
         out.push(marker + headText);
         i++;
@@ -392,6 +444,7 @@ export function convertOutlineMarkdown(text: string, options: ConvertOptions): C
     tables: [],
     warnings: [],
     warned: new Set(),
+    inStep: false,
   };
   const lines = stripLeadingYaml(text.replace(/\r\n?/g, "\n").split("\n"));
   const out = processLines(lines, ctx);
