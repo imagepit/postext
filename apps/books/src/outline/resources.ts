@@ -155,6 +155,7 @@ export function buildTableResource(table: ConvertedTable, now: number): Record<s
     id: table.id,
     typeId: "table",
     kind: "table",
+    ...(table.caption ? { caption: table.caption } : {}),
     createdAt: now,
     updatedAt: now,
     table: {

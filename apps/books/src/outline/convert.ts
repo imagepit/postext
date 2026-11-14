@@ -17,7 +17,11 @@ export interface ConvertedTable {
   align: (TableAlign | undefined)[];
   header: string[];
   rows: string[][];
+  /** 表の直前か直後の `: キャプション`（Outline は `\: キャプション` と書き出す）。 */
+  caption?: string;
 }
+
+const TABLE_CAPTION = /^\\?:\s+(\S.*)$/;
 
 export interface ConvertResult {
   markdown: string;
@@ -291,6 +295,22 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       let j = i + 2;
       while (j < lines.length && lines[j]!.trim().startsWith("|")) j++;
       const id = parseTable(ctx, lines.slice(i, j));
+      // キャプションは表の直前（空行を挟んでもよい）か直後の1行に書かれる。
+      let last = out.length - 1;
+      while (last >= 0 && out[last] === "") last--;
+      const before = last >= 0 ? TABLE_CAPTION.exec(out[last]!.trim()) : null;
+      if (before) {
+        ctx.tables.at(-1)!.caption = before[1]!.trim();
+        out.splice(last);
+      } else {
+        let k = j;
+        while (k < lines.length && lines[k]!.trim() === "") k++;
+        const after = k < lines.length ? TABLE_CAPTION.exec(lines[k]!.trim()) : null;
+        if (after) {
+          ctx.tables.at(-1)!.caption = after[1]!.trim();
+          lines.splice(k, 1);
+        }
+      }
       blank();
       out.push(`::resource{id="${id}"}`);
       blank();

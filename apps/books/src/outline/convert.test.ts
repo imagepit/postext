@@ -210,6 +210,23 @@ describe("個別の規則", () => {
     expect(r.tables[0]!.rows).toEqual([["1 | 2", "x", ""]]);
   });
 
+  it("表の直前の \\: キャプション（Outline の書き出し）を表のキャプションにし、本文から消す", () => {
+    const r = convert("説明です。\n\n\\: マージ結果の種類\n\n| a | b |\n|---|---|\n| 1 | 2 |\n");
+    expect(r.tables[0]!.caption).toBe("マージ結果の種類");
+    expect(r.markdown).toBe(`説明です。\n\n::resource{id="outline-table-${DOC.slice(0, 8)}-1"}\n`);
+  });
+
+  it("表の直後の : キャプションも表のキャプションにする", () => {
+    const r = convert("| a | b |\n|---|---|\n| 1 | 2 |\n\n: 前提となる環境\n\n次の段落。\n");
+    expect(r.tables[0]!.caption).toBe("前提となる環境");
+    expect(r.markdown).not.toContain("前提となる環境");
+    expect(r.markdown).toContain("次の段落。");
+  });
+
+  it("キャプションのない表は caption を持たない", () => {
+    expect(convert("| a |\n|---|\n| 1 |\n").tables[0]!.caption).toBeUndefined();
+  });
+
   it("箇条書き項目の続きも項目の外へ出し、警告する", () => {
     const r = convert("* 項目\n\n  ![x](/api/attachments.redirect?id=abc)\n");
     expect(r.markdown).toBe('* 項目\n\n::resource{id="outline-img-abc"}\n');
