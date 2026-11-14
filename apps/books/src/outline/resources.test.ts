@@ -66,6 +66,13 @@ describe("readImageHeader", () => {
     expect(readImageHeader(enc('<svg viewBox="0 0 640 480" width="100%"></svg>'))).toMatchObject({ format: "svg", width: 640, height: 480 });
     expect(readImageHeader(enc("<svg></svg>"))).toMatchObject({ format: "svg", width: 0, height: 0 });
   });
+
+  it("draw.io のように開始タグが長く、属性の中に > がある SVG も寸法を読む", () => {
+    const enc = (s: string) => new TextEncoder().encode(s);
+    const content = `&lt;mxfile&gt;${"x".repeat(20000)}&lt;/mxfile&gt; a>b`;
+    const svg = `<?xml version="1.0"?>\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg xmlns="http://www.w3.org/2000/svg" content="${content}" width="561px" height="321px" viewBox="-0.5 -0.5 561 321"><g/></svg>`;
+    expect(readImageHeader(enc(svg))).toMatchObject({ format: "svg", width: 561, height: 321 });
+  });
 });
 
 describe("SVG のリソース", () => {

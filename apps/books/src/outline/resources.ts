@@ -13,12 +13,30 @@ export interface ImageHeader {
   height: number;
 }
 
-const SVG_ROOT = /<svg\b[^>]*>/i;
+/**
+ * ルート要素 `<svg …>` の開始タグを返す。draw.io の SVG は図のデータを属性に持つので、
+ * 開始タグが数十KBになる。先頭の決まった長さで切らず、引用符の中の `>` を飛ばして閉じを探す。
+ */
+function svgRootTag(text: string): string | null {
+  const start = text.search(/<svg\b/i);
+  if (start < 0) return null;
+  let quote: string | null = null;
+  for (let i = start + 4; i < text.length; i++) {
+    const c = text[i]!;
+    if (quote) {
+      if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === ">") {
+      return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
 
 /** SVG のルート要素の width/height（px か単位なし）または viewBox から寸法を読む。 */
 function svgHeader(b: Uint8Array): ImageHeader | null {
-  const head = new TextDecoder().decode(b.slice(0, 4096));
-  const root = SVG_ROOT.exec(head)?.[0];
+  const root = svgRootTag(new TextDecoder().decode(b));
   if (!root) return null;
   const attr = (name: string) => new RegExp(`\\s${name}\\s*=\\s*["']([^"']*)["']`, "i").exec(root)?.[1];
   const px = (v: string | undefined) => (v && /^\s*[\d.]+\s*(px)?\s*$/i.test(v) ? Number.parseFloat(v) : 0);
