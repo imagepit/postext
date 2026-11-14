@@ -1,4 +1,6 @@
+import type { DesignPart } from "postext";
 import {
+  bigint,
   customType,
   index,
   integer,
@@ -99,3 +101,19 @@ export const bookVersions = pgTable(
     index("book_versions_book_idx").on(t.bookId),
   ],
 );
+
+// エディタの「デザインを保存」で保存したデザイン。書籍とは独立に残る。
+export const designs = pgTable("designs", {
+  // クライアントが作った id（design-xxxx）。
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  // 保存元の書籍の名前。
+  source: text("source"),
+  parts: jsonb("parts").$type<DesignPart[]>().notNull(),
+  // postext の createDesignBundle が作った .postext をそのまま保存する。
+  bytes: bytea("bytes").notNull(),
+  // SavedDesign.createdAt/updatedAt（ミリ秒）をそのまま往復させる。
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});

@@ -84,25 +84,62 @@ function moveLegacyOnce(): Promise<void> {
   return legacyMove;
 }
 
-/** Saved designs, newest first. */
-export async function listSavedDesigns(): Promise<SavedDesign[]> {
-  await moveLegacyOnce();
-  const all = await run('readonly', (s) => s.getAll() as IDBRequest<SavedDesign[]>);
-  return all.sort((a, b) => b.updatedAt - a.updatedAt);
+/** A saved design without its file: what a list needs. */
+export type SavedDesignSummary = Omit<SavedDesign, 'bytes'>;
+
+/** Where saved designs live. The default is this browser's IndexedDB; a
+ *  host can supply its own (a server database) with `setSavedDesignStorage`.
+ *  Every method throws when it fails. */
+export interface SavedDesignStorage {
+  /** Saved designs, newest first. The files may be left out. */
+  list(): Promise<SavedDesignSummary[]>;
+  get(id: string): Promise<SavedDesign | null>;
+  put(design: SavedDesign): Promise<void>;
+  delete(id: string): Promise<void>;
 }
 
-export async function getSavedDesign(id: string): Promise<SavedDesign | null> {
-  await moveLegacyOnce();
-  return (await run('readonly', (s) => s.get(id) as IDBRequest<SavedDesign | undefined>)) ?? null;
+const indexedDbStorage: SavedDesignStorage = {
+  async list() {
+    await moveLegacyOnce();
+    const all = await run('readonly', (s) => s.getAll() as IDBRequest<SavedDesign[]>);
+    return all.sort((a, b) => b.updatedAt - a.updatedAt);
+  },
+  async get(id) {
+    await moveLegacyOnce();
+    return (await run('readonly', (s) => s.get(id) as IDBRequest<SavedDesign | undefined>)) ?? null;
+  },
+  async put(d) {
+    await run('readwrite', (s) => s.put(d));
+  },
+  async delete(id) {
+    await run('readwrite', (s) => s.delete(id));
+  },
+};
+
+let storage: SavedDesignStorage = indexedDbStorage;
+
+/** Keep the saved designs in `next`; `null` goes back to IndexedDB. */
+export function setSavedDesignStorage(next: SavedDesignStorage | null): void {
+  storage = next ?? indexedDbStorage;
+  changed();
+}
+
+/** Saved designs, newest first. */
+export function listSavedDesigns(): Promise<SavedDesignSummary[]> {
+  return storage.list();
+}
+
+export function getSavedDesign(id: string): Promise<SavedDesign | null> {
+  return storage.get(id);
 }
 
 export async function putSavedDesign(d: SavedDesign): Promise<void> {
-  await run('readwrite', (s) => s.put(d));
+  await storage.put(d);
   changed();
 }
 
 export async function deleteSavedDesign(id: string): Promise<void> {
-  await run('readwrite', (s) => s.delete(id));
+  await storage.delete(id);
   changed();
 }
 
