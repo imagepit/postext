@@ -132,6 +132,10 @@ describe("個別の規則", () => {
     expect(convert(`:::note a "b" 'c'\nx\n:::\n`).markdown).toContain(`title="a ”b” 'c'"`);
   });
 
+  it(":::caution も callout になる（Git基礎研修の「チーム開発でのGitの運用」が使う）", () => {
+    expect(convert(":::caution 注意点\nx\n:::\n").markdown).toContain(':::callout{type="caution" title="注意点"}');
+  });
+
   it("title なしの :::step は title 属性を付けない", () => {
     expect(convert(":::step\nx\n:::\n").markdown).toBe(':::callout{type="step"}\nx\n\n:::\n');
   });

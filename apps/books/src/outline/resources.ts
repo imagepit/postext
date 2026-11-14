@@ -5,11 +5,31 @@ import { sha256Hex } from "@/books/model";
 import type { ConvertedImage, ConvertedTable } from "./convert";
 
 export interface ImageHeader {
-  format: "png" | "jpeg" | "gif" | "webp";
+  format: "png" | "jpeg" | "gif" | "webp" | "svg";
   mime: string;
   ext: string;
+  /** SVG は寸法を宣言しないことがあるので、その場合は 0。 */
   width: number;
   height: number;
+}
+
+const SVG_ROOT = /<svg\b[^>]*>/i;
+
+/** SVG のルート要素の width/height（px か単位なし）または viewBox から寸法を読む。 */
+function svgHeader(b: Uint8Array): ImageHeader | null {
+  const head = new TextDecoder().decode(b.slice(0, 4096));
+  const root = SVG_ROOT.exec(head)?.[0];
+  if (!root) return null;
+  const attr = (name: string) => new RegExp(`\\s${name}\\s*=\\s*["']([^"']*)["']`, "i").exec(root)?.[1];
+  const px = (v: string | undefined) => (v && /^\s*[\d.]+\s*(px)?\s*$/i.test(v) ? Number.parseFloat(v) : 0);
+  let width = px(attr("width"));
+  let height = px(attr("height"));
+  if (!(width > 0 && height > 0)) {
+    const box = attr("viewBox")?.trim().split(/[\s,]+/).map(Number);
+    if (box && box.length === 4 && box[2]! > 0 && box[3]! > 0) [width, height] = [box[2]!, box[3]!];
+    else [width, height] = [0, 0];
+  }
+  return { format: "svg", mime: "image/svg+xml", ext: "svg", width: Math.round(width), height: Math.round(height) };
 }
 
 const be32 = (b: Uint8Array, o: number) => ((b[o]! << 24) | (b[o + 1]! << 16) | (b[o + 2]! << 8) | b[o + 3]!) >>> 0;
@@ -74,7 +94,7 @@ export function readImageHeader(b: Uint8Array): ImageHeader | null {
     const size = webpSize(b);
     return size && size.width > 0 && size.height > 0 ? { format: "webp", mime: "image/webp", ext: "webp", ...size } : null;
   }
-  return null;
+  return svgHeader(b);
 }
 
 export const assetPathOf = (attachmentId: string, ext: string): string => `outline/${attachmentId}.${ext}`;
@@ -84,19 +104,21 @@ export function buildImageResource(
   header: ImageHeader,
   now: number,
 ): Record<string, unknown> {
+  const fileId = assetPathOf(image.attachmentId, header.ext);
+  const body =
+    header.format === "svg"
+      ? {
+          kind: "svg",
+          svg: { fileId, ...(header.width > 0 && header.height > 0 ? { width: header.width, height: header.height } : {}) },
+        }
+      : { kind: "bitmap", bitmap: { fileId, format: header.format, width: header.width, height: header.height } };
   return {
     id: image.resourceId,
     typeId: "figure",
-    kind: "bitmap",
+    ...body,
     ...(image.alt ? { caption: image.alt, altText: image.alt } : {}),
     createdAt: now,
     updatedAt: now,
-    bitmap: {
-      fileId: assetPathOf(image.attachmentId, header.ext),
-      format: header.format,
-      width: header.width,
-      height: header.height,
-    },
     placement: {
       position: "here",
       ...(image.widthPercent !== undefined ? { width: image.widthPercent / 100 } : {}),

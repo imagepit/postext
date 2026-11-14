@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { convertOutlineMarkdown } from "./convert";
+import { convertOutlineMarkdown, type ConvertedImage } from "./convert";
 import { buildImageResource, buildResources, buildTableResource, readImageHeader } from "./resources";
 
 const png = (width: number, height: number): Uint8Array => {
@@ -58,6 +58,25 @@ describe("readImageHeader", () => {
     expect(readImageHeader(new TextEncoder().encode("<html></html>"))).toBeNull();
     expect(readImageHeader(png(0, 10))).toBeNull();
     expect(readImageHeader(new Uint8Array(0))).toBeNull();
+  });
+
+  it("SVG は width/height か viewBox から寸法を読み、宣言がなければ 0 にする", () => {
+    const enc = (s: string) => new TextEncoder().encode(s);
+    expect(readImageHeader(enc('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="320px" height="200"></svg>'))).toMatchObject({ format: "svg", ext: "svg", width: 320, height: 200 });
+    expect(readImageHeader(enc('<svg viewBox="0 0 640 480" width="100%"></svg>'))).toMatchObject({ format: "svg", width: 640, height: 480 });
+    expect(readImageHeader(enc("<svg></svg>"))).toMatchObject({ format: "svg", width: 0, height: 0 });
+  });
+});
+
+describe("SVG のリソース", () => {
+  it("SVG は svg リソースになり、寸法がなければ width/height を持たない", () => {
+    const image: ConvertedImage = { resourceId: "outline-img-a", attachmentId: "a", alt: "図", widthPercent: 80 };
+    const withSize = buildImageResource(image, { format: "svg", mime: "image/svg+xml", ext: "svg", width: 640, height: 480 }, 0);
+    expect(withSize).toMatchObject({ kind: "svg", svg: { fileId: "outline/a.svg", width: 640, height: 480 }, placement: { position: "here", width: 0.8 } });
+    expect(withSize).not.toHaveProperty("bitmap");
+    const noSize = buildImageResource(image, { format: "svg", mime: "image/svg+xml", ext: "svg", width: 0, height: 0 }, 0);
+    expect(noSize).toMatchObject({ kind: "svg", svg: { fileId: "outline/a.svg" } });
+    expect((noSize as { svg: Record<string, unknown> }).svg).not.toHaveProperty("width");
   });
 });
 

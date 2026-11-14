@@ -41,7 +41,7 @@ interface Ctx {
   warned: Set<string>;
 }
 
-const CALLOUT_TYPES = new Set(["note", "syntax", "step"]);
+const CALLOUT_TYPES = new Set(["note", "syntax", "step", "caution"]);
 const FENCE_OPEN = /^(\s*)(`{3,}|~{3,})\s*(.*)$/;
 const ORDERED = /^(\d+)([.)])\s+(.*)$/;
 const BULLET = /^([*+-])\s+(.*)$/;
