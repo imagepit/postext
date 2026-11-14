@@ -47,9 +47,51 @@ export type OutlineSource = Pick<OutlineClient, "listChildDocuments" | "fetchAtt
 
 const primaryLocaleOf = (book: BookWithAssetData): string => book.locale ?? book.chapters[0]?.locale ?? "en";
 
-function convertDocument(doc: OutlineDocument) {
+const stripInlineMarks = (title: string): string =>
+  title
+    .replace(/\s*\{[^{}]*\}\s*$/, "")
+    .replace(/(\*\*|__|~~)(.+?)\1/g, "$2")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/(^|[\s(（])_([^_]+)_(?=$|[\s)）、。,.])/g, "$1$2")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/** 章の `##` と `###` から「【この章の内容】」ブロックを作る。コードブロック内の行は見出しにしない。`##` がなければ空文字。 */
+export function chapterContentsBlock(markdown: string, chapterNo: number): string {
+  const items: string[] = [];
+  let fence: { char: string; len: number } | null = null;
+  let h2 = 0;
+  let h3 = 0;
+  for (const line of markdown.split("\n")) {
+    const f = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (f) {
+      const marker = f[1]!;
+      if (!fence) fence = { char: marker[0]!, len: marker.length };
+      else if (marker[0] === fence.char && marker.length >= fence.len && /^\s*[`~]+\s*$/.test(line)) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const m = /^(##|###)\s+(.+?)\s*$/.exec(line);
+    if (!m) continue;
+    const title = stripInlineMarks(m[2]!.replace(/\s+#+$/, ""));
+    if (!title) continue;
+    if (m[1] === "##") {
+      h2++;
+      h3 = 0;
+      items.push(`- ${chapterNo}.${h2} ${title}`);
+    } else if (h2 > 0) {
+      h3++;
+      items.push(`  - ${chapterNo}.${h2}.${h3} ${title}`);
+    }
+  }
+  if (h2 === 0) return "";
+  return `:::callout{type="chapter-contents" label="【この章の内容】"}\n${items.join("\n")}\n:::\n\n`;
+}
+
+/** chapterNo は Outline の親文書の子の並びでの 1 始まりの位置。 */
+function convertDocument(doc: OutlineDocument, chapterNo: number) {
   const converted = convertOutlineMarkdown(doc.text, { docId: doc.id });
-  const body = `# ${doc.title}\n\n${converted.markdown}`;
+  const body = `# ${doc.title}\n\n${chapterContentsBlock(converted.markdown, chapterNo)}${converted.markdown}`;
   return { converted, body, hash: hashBody(body) };
 }
 
@@ -74,11 +116,12 @@ export async function previewImport(
   const docs = await client.listChildDocuments(parentId);
   const { primary, entries } = classifyAgainst(book, docs);
   const byId = new Map(docs.map((d) => [d.id, d]));
+  const numberOf = new Map(docs.map((d, i) => [d.id, i + 1]));
   const chapters: PreviewEntry[] = entries.map((entry: ClassifiedEntry) => {
     const doc = byId.get(entry.documentId);
     const current = entry.chapterIndex !== undefined ? bodyOf(primary[entry.chapterIndex]!.c.markdown) : "";
     if (!doc) return { documentId: entry.documentId, title: entry.title, status: entry.status, warnings: [], diff: [] };
-    const { converted, body } = convertDocument(doc);
+    const { converted, body } = convertDocument(doc, numberOf.get(doc.id) ?? 1);
     return {
       documentId: doc.id,
       title: doc.title,
@@ -135,7 +178,7 @@ export async function applyImport(
       warnings.push(`${doc.title}: 取り込み対象外の状態（${status}）のためスキップしました`);
       continue;
     }
-    const { converted, body, hash } = convertDocument(doc);
+    const { converted, body, hash } = convertDocument(doc, k + 1);
     const built = await buildResources(converted, (id) => client.fetchAttachment(id), now());
     for (const w of [...converted.warnings, ...built.warnings]) warnings.push(`${doc.title}: ${w}`);
     resources = upsertById(resources, built.resources);

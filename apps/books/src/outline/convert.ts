@@ -257,7 +257,7 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       if (CALLOUT_TYPES.has(name)) {
         const title = (dm[2] ?? "").trim();
         blank();
-        out.push(`:::callout{type="${name}"${title ? ` title=${attrValue(title)}` : ""}}`);
+        out.push(`:::callout{type="${name}"${title ? ` label=${attrValue(title)}` : ""}}`);
         i++;
         continue;
       }

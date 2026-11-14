@@ -23,8 +23,8 @@ describe("git-basics の変換", () => {
 
   it("3. note / syntax / step は callout になり、閉じの ::: はそのまま", () => {
     expect(lines).toContain(':::callout{type="step"}');
-    expect(lines).toContain(':::callout{type="syntax" title="ローカルリポジトリの初期化"}');
-    expect(lines).toContain(':::callout{type="note" title=".gitフォルダについて"}');
+    expect(lines).toContain(':::callout{type="syntax" label="ローカルリポジトリの初期化"}');
+    expect(lines).toContain(':::callout{type="note" label=".gitフォルダについて"}');
     expect(lines.filter((l) => l === ":::")).toHaveLength(3);
   });
 
@@ -128,16 +128,24 @@ describe("個別の規則", () => {
   });
 
   it("title に二重引用符があれば一重引用符で囲み、両方あれば印刷用の引用符にする", () => {
-    expect(convert(':::note He said "hi"\nx\n:::\n').markdown).toContain(`title='He said "hi"'`);
-    expect(convert(`:::note a "b" 'c'\nx\n:::\n`).markdown).toContain(`title="a ”b” 'c'"`);
+    expect(convert(':::note He said "hi"\nx\n:::\n').markdown).toContain(`label='He said "hi"'`);
+    expect(convert(`:::note a "b" 'c'\nx\n:::\n`).markdown).toContain(`label="a ”b” 'c'"`);
   });
 
   it(":::caution も callout になる（Git基礎研修の「チーム開発でのGitの運用」が使う）", () => {
-    expect(convert(":::caution 注意点\nx\n:::\n").markdown).toContain(':::callout{type="caution" title="注意点"}');
+    expect(convert(":::caution 注意点\nx\n:::\n").markdown).toContain(':::callout{type="caution" label="注意点"}');
   });
 
-  it("title なしの :::step は title 属性を付けない", () => {
+  it("title なしの :::step は label 属性を付けない", () => {
     expect(convert(":::step\nx\n:::\n").markdown).toBe(':::callout{type="step"}\nx\n\n:::\n');
+  });
+
+  it("callout の題は title ではなく label 属性になる（note / syntax / caution、波括弧は全角にする）", () => {
+    for (const kind of ["note", "syntax", "caution"]) {
+      const md = convert(`:::${kind} 題 {x}\nx\n:::\n`).markdown;
+      expect(md).toContain(`:::callout{type="${kind}" label="題 ｛x｝"}`);
+      expect(md).not.toContain("title=");
+    }
   });
 
   it("未対応の ::: ブロックはテキストのまま残して警告する", () => {

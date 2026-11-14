@@ -274,4 +274,33 @@ describe("Outline の取り込み", () => {
     await applyImport(repo, book.id, { baseRevision: 1, parentId: PARENT, documentIds: [docB().id] }, outline);
     expect((await load(book.id)).chapters.map((c) => c.title)).toEqual(["はじめに", "最初の章", "次の章", "三番目", "Chapter"]);
   });
+
+  it("【この章の内容】は章番号と節番号つきで、コードブロック内の見出しを無視する", async () => {
+    const book = await createBook(repo, draft());
+    const a = docA("\n## 準備 {#prep}\n\n### **道具**を揃える\n\n```bash\n## コメント\n### これも見出しではない\n```\n\n### 手順\n\n## 実行\n");
+    const b = docB("## 概要\n\n### 詳細\n");
+    const outline = new FakeOutline([a, b]);
+    await applyImport(repo, book.id, { baseRevision: 0, parentId: PARENT, documentIds: [a.id, b.id] }, outline);
+    const after = await load(book.id);
+    const first = after.chapters.find((c) => c.title === "最初の章")!.markdown;
+    const second = after.chapters.find((c) => c.title === "次の章")!.markdown;
+    expect(first).toContain(
+      '# 最初の章\n\n:::callout{type="chapter-contents" label="【この章の内容】"}\n' +
+        "- 1.1 準備\n  - 1.1.1 道具を揃える\n  - 1.1.2 手順\n- 1.2 実行\n:::\n\n本文A",
+    );
+    expect(first).not.toContain("これも見出しではない\n  -");
+    expect(second).toContain('# 次の章\n\n:::callout{type="chapter-contents" label="【この章の内容】"}\n- 2.1 概要\n  - 2.1.1 詳細\n:::\n');
+
+    // 変わっていない文書の再取り込みは unchanged のまま
+    const again = await previewImport(repo, book.id, PARENT, outline);
+    expect(again.ok && again.chapters.map((c) => c.status)).toEqual(["unchanged", "unchanged"]);
+  });
+
+  it("## がない章には【この章の内容】を入れない", async () => {
+    const book = await createBook(repo, draft());
+    const outline = new FakeOutline([docB("本文B\n\n### 孤立した小見出し\n")]);
+    await applyImport(repo, book.id, { baseRevision: 0, parentId: PARENT, documentIds: [docB().id] }, outline);
+    const md = (await load(book.id)).chapters.find((c) => c.title === "次の章")!.markdown;
+    expect(md).not.toContain("chapter-contents");
+  });
 });

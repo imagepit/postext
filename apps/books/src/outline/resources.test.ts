@@ -114,6 +114,15 @@ describe("リソースの組み立て", () => {
     expect(r.placement).toEqual({ position: "here" });
   });
 
+  it("alt がある画像は figure、ない画像は接頭辞を持たない image にする", () => {
+    const header = readImageHeader(png(1, 1))!;
+    const withAlt = buildImageResource({ attachmentId: "a", resourceId: "r1", alt: "説明" }, header, 0);
+    const noAlt = buildImageResource({ attachmentId: "a", resourceId: "r2", alt: "" }, header, 0);
+    expect(withAlt.typeId).toBe("figure");
+    expect(withAlt.caption).toBe("説明");
+    expect(noAlt.typeId).toBe("image");
+  });
+
   it("表は見出し行つきの table リソースになる", () => {
     const converted = convertOutlineMarkdown("| 項目 | 内容 |\n|:--|--:|\n| `a` | **b** |\n", { docId: "12345678-0000" });
     const resource = buildTableResource(converted.tables[0]!, 5);

@@ -132,7 +132,8 @@ export function buildImageResource(
       : { kind: "bitmap", bitmap: { fileId, format: header.format, width: header.width, height: header.height } };
   return {
     id: image.resourceId,
-    typeId: "figure",
+    // alt があれば「図N: alt」を印字する figure。なければ接頭辞を持たない image（設定側で定義する）にして「図N:」だけの行を出さない。
+    typeId: image.alt ? "figure" : "image",
     ...body,
     ...(image.alt ? { caption: image.alt, altText: image.alt } : {}),
     createdAt: now,
