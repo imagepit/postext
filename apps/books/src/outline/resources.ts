@@ -153,7 +153,8 @@ export function buildTableResource(table: ConvertedTable, now: number): Record<s
   });
   return {
     id: table.id,
-    typeId: "table",
+    // キャプションのない表は、画像と同じく接頭辞のない種類にして「表N:」だけの行を出さない。
+    typeId: table.caption ? "table" : "table-plain",
     kind: "table",
     ...(table.caption ? { caption: table.caption } : {}),
     createdAt: now,

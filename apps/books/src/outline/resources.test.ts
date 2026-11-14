@@ -123,12 +123,19 @@ describe("リソースの組み立て", () => {
     expect(noAlt.typeId).toBe("image");
   });
 
+  it("キャプションのある表は table、ない表は接頭辞のない table-plain になる", () => {
+    const withCaption = convertOutlineMarkdown("\\: 前提となる環境\n\n| a |\n|---|\n| 1 |\n", { docId: "12345678-0000" });
+    const captioned = buildTableResource(withCaption.tables[0]!, 0);
+    expect(captioned.typeId).toBe("table");
+    expect(captioned.caption).toBe("前提となる環境");
+  });
+
   it("表は見出し行つきの table リソースになる", () => {
     const converted = convertOutlineMarkdown("| 項目 | 内容 |\n|:--|--:|\n| `a` | **b** |\n", { docId: "12345678-0000" });
     const resource = buildTableResource(converted.tables[0]!, 5);
     expect(resource).toEqual({
       id: "outline-table-12345678-1",
-      typeId: "table",
+      typeId: "table-plain",
       kind: "table",
       createdAt: 5,
       updatedAt: 5,
