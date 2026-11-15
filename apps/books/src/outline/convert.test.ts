@@ -26,8 +26,8 @@ describe("git-basics の変換", () => {
     expect(lines).toContain(':::callout{type="step"}');
     expect(lines).toContain(':::callout{type="syntax" label="ローカルリポジトリの初期化"}');
     expect(lines).toContain(':::callout{type="note" label=".gitフォルダについて"}');
-    // callout の閉じ 3 つ + step-item の閉じ 2 つ
-    expect(lines.filter((l) => l === ":::")).toHaveLength(5);
+    // callout の閉じ 3 つ + step-item の閉じ 2 つ + 端末ボックスの閉じ 1 つ
+    expect(lines.filter((l) => l === ":::")).toHaveLength(6);
   });
 
   it("4. 画像は単独の ::resource 行になり、alt と幅が集まる", () => {
@@ -69,7 +69,7 @@ describe("git-basics の変換", () => {
   });
 
   it("6. フェンス直前の *題* は title になり、題の行は消える", () => {
-    expect(lines).toContain('```bash {title="コマンド実行"}');
+    expect(lines).toContain(':::callout{type="terminal" label="コマンド実行"}');
     expect(lines).toContain('```html {title="index.html（25行目あたり）" highlight="3"}');
     expect(result.markdown).not.toContain("*コマンド実行*");
     // 題のないフェンスはそのまま
@@ -108,7 +108,7 @@ describe("git-basics の変換", () => {
       lines.indexOf("1. フォルダを作成") + 1,
     );
     // 項目の続きの中のコードブロックにも題が付く
-    expect(lines.indexOf('```bash {title="コマンド実行"}')).toBeGreaterThan(i2);
+    expect(lines.indexOf(':::callout{type="terminal" label="コマンド実行"}')).toBeGreaterThan(i2);
   });
 
   it("8. 箇条書きの入れ子は Postext の入れ子のまま残る", () => {
@@ -175,9 +175,9 @@ describe("個別の規則", () => {
   });
 
   it("コードフェンス内の番号付き行は項目にならない", () => {
-    const md = convert(":::step\n1. 実行\n\n   ```bash\n   1. x\n   ```\n:::\n").markdown;
+    const md = convert(":::step\n1. 実行\n\n   ```text\n   1. x\n   ```\n:::\n").markdown;
     expect(md.match(/step-item/g)).toHaveLength(1);
-    expect(md).toContain("```bash\n1. x\n```");
+    expect(md).toContain("```text\n1. x\n```");
   });
 
   it("21 番目以降の手順項目も数字のまま label になる", () => {
@@ -260,5 +260,52 @@ describe("個別の規則", () => {
 
   it("CRLF でも同じ結果になる", () => {
     expect(convert(fixture.replace(/\n/g, "\r\n")).markdown).toBe(result.markdown);
+  });
+});
+
+describe("端末ボックス（bash / bash-output）", () => {
+  it("bash だけ: terminal callout に \"$ \" 付きの console", () => {
+    expect(convert("```bash\ngit init\nls\n```\n").markdown).toBe(
+      ':::callout{type="terminal"}\n\n```console\n$ git init\n$ ls\n```\n\n:::\n',
+    );
+  });
+
+  it("bash + bash-output は1つの console にまとまる（出力は接頭辞なし、空行を挟んでもよい）", () => {
+    const r = convert("```bash\njava -version\n```\n\n```bash-output\nopenjdk 21\nruntime\n```\n");
+    expect(r.markdown).toBe(':::callout{type="terminal"}\n\n```console\n$ java -version\nopenjdk 21\nruntime\n```\n\n:::\n');
+  });
+
+  it("題は label になり、highlight など他の属性は console に残る", () => {
+    const r = convert("*確認*\n\n```bash\na\n//addstart\nb\n//addend\n```\n");
+    expect(r.markdown).toBe(':::callout{type="terminal" label="確認"}\n\n```console {highlight="2"}\n$ a\n$ b\n```\n\n:::\n');
+    const r2 = convert('```sh {title="T" x=1}\na\n```\n');
+    expect(r2.markdown).toBe(':::callout{type="terminal" label="T"}\n\n```console {x=1}\n$ a\n```\n\n:::\n');
+  });
+
+  it("bash-stdout も出力として扱い、出力側の highlight は行番号をずらす", () => {
+    const r = convert("```zsh\nls\n```\n```bash-stdout\na\n//addstart\nb\n//addend\n```\n");
+    expect(r.markdown).toBe(':::callout{type="terminal"}\n\n```console {highlight="3"}\n$ ls\na\nb\n```\n\n:::\n');
+  });
+
+  it("bash-output だけ: 接頭辞なしの端末ボックス", () => {
+    expect(convert("```bash-output\nfoo\n```\n").markdown).toBe(':::callout{type="terminal"}\n\n```console\nfoo\n```\n\n:::\n');
+  });
+
+  it("bash 以外のフェンスは変えず、bash-output が続かない別フェンスも消費しない", () => {
+    expect(convert("```java\nint a;\n```\n").markdown).toBe("```java\nint a;\n```\n");
+    const r = convert("```bash\nls\n```\n\n```java\nx\n```\n");
+    expect(r.markdown).toBe(':::callout{type="terminal"}\n\n```console\n$ ls\n```\n\n:::\n\n```java\nx\n```\n');
+  });
+
+  it("すでに \"$ \" で始まる行と空行には接頭辞を付けない", () => {
+    expect(convert("```bash\n$ ls\n\npwd\n```\n").markdown).toBe(
+      ':::callout{type="terminal"}\n\n```console\n$ ls\n\n$ pwd\n```\n\n:::\n',
+    );
+  });
+
+  it("callout の中でも入れ子の terminal が空行つきで出る", () => {
+    expect(convert(":::note 注\n\n```bash\nls\n```\n\n:::\n").markdown).toBe(
+      ':::callout{type="note" label="注"}\n\n:::callout{type="terminal"}\n\n```console\n$ ls\n```\n\n:::\n\n:::\n',
+    );
   });
 });
