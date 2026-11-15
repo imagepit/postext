@@ -71,6 +71,54 @@ export function codeFenceSettings(block: ContentBlock, cs: ResolvedCodeStyleConf
   };
 }
 
+/** What a piece of an annotated line is: `plain` text as written, the
+ *  `arrow` that stands for a marker, or the bold `note` after it. */
+type AnnotationRole = 'plain' | 'arrow' | 'note';
+
+/** A marker (`<--`, `v--`, `^--`) directly followed by `[note]`. */
+const ANNOTATION_RE = /(<--|v--|\^--)\[([^\]]*)\]/g;
+const ANNOTATION_ARROWS: Readonly<Record<string, string>> = { '<--': '\u27F5', 'v--': '\u2B10', '^--': '\u2B11' };
+
+/** The highlighter's pieces of one line, split at its annotations (CORE-213):
+ *  each marker becomes its arrow, each note keeps its text in the `note`
+ *  role, and the brackets go. Text outside keeps its token and colour. A
+ *  line with no annotation comes back as it was. */
+function annotatePieces(pieces: readonly CodeToken[], line: string): Array<CodeToken & { role: AnnotationRole }> {
+  const marks: Array<{ start: number; end: number; arrow: string; noteStart: number; noteEnd: number }> = [];
+  for (const m of line.matchAll(ANNOTATION_RE)) {
+    const start = m.index!;
+    marks.push({ start, end: start + m[0].length, arrow: ANNOTATION_ARROWS[m[1]!]!, noteStart: start + 4, noteEnd: start + 4 + m[2]!.length });
+  }
+  if (marks.length === 0) return pieces.map((p) => ({ ...p, role: 'plain' as const }));
+  const out: Array<CodeToken & { role: AnnotationRole }> = [];
+  let at = 0;
+  for (const piece of pieces) {
+    const { text, ...rest } = piece;
+    let chunk = '';
+    let role: AnnotationRole = 'plain';
+    const flush = () => {
+      if (chunk) out.push({ ...rest, text: chunk, role });
+      chunk = '';
+    };
+    for (let i = 0; i < text.length; i++) {
+      const pos = at + i;
+      const mark = marks.find((x) => pos >= x.start && pos < x.end);
+      let next: AnnotationRole = 'plain';
+      let ch: string = text[i]!;
+      if (mark) {
+        if (pos === mark.start) { next = 'arrow'; ch = mark.arrow; }
+        else if (pos >= mark.noteStart && pos < mark.noteEnd) next = 'note';
+        else continue; // the rest of the marker and the brackets
+      }
+      if (next !== role) { flush(); role = next; }
+      chunk += ch;
+    }
+    flush();
+    at += text.length;
+  }
+  return out;
+}
+
 /** East Asian wide and full-width characters: two cells of a grid of
  *  character cells (tab stops count them so). */
 const WIDE_RE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|[\uD840-\uD87F][\uDC00-\uDFFF]/;
@@ -156,16 +204,20 @@ export function measureCodeLines(input: CodeLinesInput): MeasuredCode {
 
   /** The runs of every line at one size. */
   const runsAt = (faces: Faces): Run[][] => info.lines.map((line, k) => {
-    const pieces: CodeToken[] = tokens?.[k] ?? (line.length > 0 ? [{ text: line }] : []);
+    const raw: CodeToken[] = tokens?.[k] ?? (line.length > 0 ? [{ text: line }] : []);
+    const lineBold = cs.highlightBold && fence.highlight.has(k + 1);
+    const pieces = cs.annotations ? annotatePieces(raw, line) : raw.map((p) => ({ ...p, role: 'plain' as AnnotationRole }));
     const runs: Run[] = [];
     let col = 0;
     for (const piece of pieces) {
       const kind: CodeTokenKind | undefined = piece.token;
       const look = kind ? cs.tokens[kind] : undefined;
-      const bold = look?.bold === true;
+      const bold = look?.bold === true || piece.role === 'note' || lineBold;
       const italic = look?.italic === true;
       const font = bold ? (italic ? faces.boldItalic : faces.bold) : italic ? faces.italic : faces.normal;
-      const color = piece.color ?? look?.color?.hex;
+      // A run bolded by an annotation or a highlighted line keeps the code's colour: unset, the painters
+      // would give it the body's bold colour.
+      const color = piece.color ?? look?.color?.hex ?? (bold && look?.bold !== true ? cs.color.hex : undefined);
       let text = '';
       const flush = () => {
         if (text.length === 0) return;

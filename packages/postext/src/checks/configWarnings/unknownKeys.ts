@@ -71,7 +71,7 @@ const CODE_STYLE_KEYS = {
   lineHeight: true, snapToGrid: true, color: true, backgroundEnabled: true, background: true, padding: true,
   border: true, borderRadius: true, marginTop: true, marginBottom: true, span: true, tabSize: true, overflow: true,
   wrapIndent: true, wrapMarker: true, minFontScale: true, lineNumbers: true, lineNumberColor: true,
-  lineNumberGap: true, highlightBackground: true, keepTogether: true, splitMinLines: true, repeatTitle: true,
+  lineNumberGap: true, highlightBackground: true, annotations: true, highlightBold: true, keepTogether: true, splitMinLines: true, repeatTitle: true,
   continuesMarkerEnabled: true, continuesMarker: true, titleStyle: true, label: true, highlight: true, tokens: true,
   inline: true,
 } satisfies Record<keyof CodeStyleConfig, true>;
