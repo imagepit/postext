@@ -53,6 +53,12 @@ describe('codeStyle.annotations', () => {
     expect(segs(note!).find((s) => s.text === 'the note')!.color).toBe('#fafafa');
     expect(segs(hl!).filter((s) => s.kind === 'text').every((s) => s.color === '#fafafa')).toBe(true);
   });
+  it('drops the comment mark before a marker: the arrow stands for it', () => {
+    const lines = linesOf(['class Hello { // <--[name]', '// v--[next]', '#^--[prev]', 'a(); //<--[x] // plain comment'], { annotations: true });
+    expect(lines.map((l) => l.text)).toEqual(['class Hello { ⟵name', '⬐next', '⬑prev', 'a(); ⟵x // plain comment']);
+    expect(segs(lines[0]!).find((s) => s.text === 'name')!.bold).toBe(true);
+    expect(linesOf(['// just a comment', 'x <-- y // <-- not'], { annotations: true }).map((l) => l.text)).toEqual(['// just a comment', 'x <-- y // <-- not']);
+  });
   it('knows the three markers and several to a line', () => {
     const lines = linesOf(['v--[down]', '^--[up]', 'a <--[one] b ^--[two]'], { annotations: true });
     expect(lines.map((l) => l.text)).toEqual(['⬐down', '⬑up', 'a ⟵one b ⬑two']);
