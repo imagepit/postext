@@ -1,6 +1,7 @@
 import { bundleFileMime, createBundle, MANIFEST_FILE, openBundle } from "postext/bundle";
 import type { PostextConfig, Resource } from "postext";
 import type { BundleStart } from "postext/bundle";
+import { stripZipFiles } from "../storage/zipSplit";
 import { sha256Hex } from "./model";
 import type { AssetData, BookContent, ChapterContent } from "./model";
 
@@ -86,4 +87,16 @@ export async function fromBundle(bytes: Uint8Array): Promise<BundleBook> {
     })),
     assets,
   };
+}
+
+/**
+ * 資産ファイル（画像・フォント）を除いた .postext と、除いたファイルに分ける。
+ * 除いた .postext は openBundle では開けない（資源が参照するファイルがない）ので、joinZipFiles で戻してから使う。
+ */
+export async function splitBookBundle(
+  bytes: Uint8Array,
+): Promise<{ stripped: Uint8Array; assets: AssetData[] }> {
+  const { assets } = await fromBundle(bytes);
+  const paths = new Set(assets.map((a) => a.path));
+  return { stripped: stripZipFiles(bytes, (p) => paths.has(p)).stripped, assets };
 }

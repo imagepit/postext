@@ -1,9 +1,12 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "../db/client";
+import { FsBlobStore } from "../storage/blobStore";
 import * as schema from "../db/schema";
 import { createBundle, openBundle, openBundleZip, zipBundle } from "postext/bundle";
 import { fromBundle, toBundle } from "./bundle";
@@ -23,6 +26,9 @@ import {
 const url =
   process.env.TEST_DATABASE_URL ?? "postgres://books:books-local-only@127.0.0.1:55439/books";
 
+// 画像・フォントは R2 の代わりにテスト用の一時ディレクトリへ置く。
+const blobDir = mkdtempSync(path.join(tmpdir(), "books-blobs-"));
+
 let pool: Pool;
 let repo: BookRepository;
 
@@ -30,7 +36,7 @@ beforeAll(async () => {
   pool = new Pool({ connectionString: url });
   const db: Db = drizzle(pool, { schema });
   await migrate(db, { migrationsFolder: path.join(__dirname, "../../drizzle") });
-  repo = createPgRepository(db);
+  repo = createPgRepository(db, new FsBlobStore(blobDir));
 });
 
 afterAll(async () => {

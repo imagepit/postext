@@ -1,6 +1,12 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { assets, bookEditions, bookVersions, books, chapters } from "../db/schema";
+import { assets, bookEditions, bookVersionAssets, bookVersions, books, chapters } from "../db/schema";
+import type { BlobRef, BlobStore } from "../storage/blobStore";
+import { getBlobStore } from "../storage/config";
+import { knownRefs, resolveAssetRefs } from "../storage/refs";
+import type { KnownRefs } from "../storage/refs";
+import { joinZipFiles } from "../storage/zipSplit";
+import { splitBookBundle } from "./bundle";
 import { nextRevision } from "./model";
 import type {
   AssetData,
@@ -26,7 +32,46 @@ const versionColumns = {
   createdAt: bookVersions.createdAt,
 };
 
-async function insertChildren(tx: Tx, bookId: string, content: BookWrite): Promise<void> {
+const refOfRow = (row: {
+  storage: "outline" | "postext" | null;
+  objectKey: string | null;
+  sha256: string;
+  size: number;
+  mime: string;
+}): BlobRef | undefined =>
+  row.storage && row.objectKey
+    ? { storage: row.storage, key: row.objectKey, sha256: row.sha256, size: row.size, mime: row.mime }
+    : undefined;
+
+/** 書籍がすでに持つ参照。保存する資産が同じ内容なら、これを使い回す。 */
+async function readKnownRefs(db: Db | Tx, bookId: string): Promise<KnownRefs> {
+  const rows = await db.select().from(assets).where(eq(assets.bookId, bookId));
+  return knownRefs(
+    rows.flatMap((r) => {
+      const ref = refOfRow(r);
+      return ref ? [{ path: r.path, ref }] : [];
+    }),
+  );
+}
+
+const BYTE_FETCH_CONCURRENCY = 4;
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < items.length; i = next++) out[i] = await fn(items[i]!);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+async function insertChildren(
+  tx: Tx,
+  bookId: string,
+  content: BookWrite,
+  refs: Map<string, BlobRef>,
+): Promise<void> {
   if (content.chapters.length > 0) {
     await tx.insert(chapters).values(
       content.chapters.map((c, position) => ({ bookId, position, ...c })),
@@ -35,14 +80,20 @@ async function insertChildren(tx: Tx, bookId: string, content: BookWrite): Promi
   await insertEditions(tx, bookId, content);
   if (content.assets && content.assets.length > 0) {
     await tx.insert(assets).values(
-      content.assets.map((a) => ({
-        bookId,
-        kind: a.kind,
-        path: a.path,
-        mime: a.mime,
-        bytes: a.bytes,
-        sha256: a.sha256,
-      })),
+      content.assets.map((a) => {
+        const ref = refs.get(a.path)!;
+        return {
+          bookId,
+          kind: a.kind,
+          path: a.path,
+          mime: a.mime,
+          bytes: null,
+          sha256: ref.sha256,
+          storage: ref.storage,
+          objectKey: ref.key,
+          size: ref.size,
+        };
+      }),
     );
   }
 }
@@ -111,9 +162,28 @@ async function readContent(tx: Tx, row: typeof books.$inferSelect): Promise<Book
 const primaryLocale = (content: BookContent): string | null =>
   content.locale ?? content.chapters[0]?.locale ?? null;
 
-export function createPgRepository(db: Db): BookRepository {
+/**
+ * store を省くと環境変数から作る（R2、開発では .data/blobs）。
+ * 画像・フォントのバイト列は DB に置かず、assets / book_version_assets は参照だけを持つ。
+ */
+export function createPgRepository(db: Db, store?: BlobStore): BookRepository {
+  const blobs = (): BlobStore => store ?? getBlobStore();
+  const refsFor = (content: BookWrite, known?: KnownRefs) =>
+    resolveAssetRefs(
+      blobs(),
+      (content.assets ?? []).map((a) => ({
+        path: a.path,
+        mime: a.mime,
+        bytes: a.bytes,
+        ...(a.ref ? { ref: a.ref } : {}),
+        ...(a.outlineKey ? { outlineKey: a.outlineKey } : {}),
+      })),
+      known,
+    );
   return {
     async create(content) {
+      // R2 への書き込みはトランザクションの外で済ませる。
+      const refs = await refsFor(content);
       return db.transaction(async (tx) => {
         const [row] = await tx
           .insert(books)
@@ -125,7 +195,7 @@ export function createPgRepository(db: Db): BookRepository {
             sharedConfig: content.sharedConfig ?? null,
           })
           .returning();
-        await insertChildren(tx, row!.id, content);
+        await insertChildren(tx, row!.id, content, refs);
         const assetMetas = await readAssetMetas(tx, row!.id);
         return {
           id: row!.id,
@@ -166,7 +236,7 @@ export function createPgRepository(db: Db): BookRepository {
     },
 
     async getWithAssetData(id): Promise<BookWithAssetData | null> {
-      return snapshot(db, async (tx) => {
+      const loaded = await snapshot(db, async (tx) => {
         const [row] = await tx.select().from(books).where(eq(books.id, id));
         if (!row) return null;
         const rows = await tx
@@ -174,24 +244,31 @@ export function createPgRepository(db: Db): BookRepository {
           .from(assets)
           .where(eq(assets.bookId, id))
           .orderBy(asc(assets.path));
-        const data: AssetData[] = rows.map((a) => ({
+        return { row, rows, content: await readContent(tx, row) };
+      });
+      if (!loaded) return null;
+      // スナップショットを閉じてから、R2（とディスクキャッシュ）からバイト列を読む。
+      const data: AssetData[] = await mapLimit(loaded.rows, BYTE_FETCH_CONCURRENCY, async (a) => {
+        const ref = refOfRow(a);
+        const bytes = ref ? Buffer.from(await blobs().get(ref)) : a.bytes;
+        if (!bytes) throw new Error(`資産 ${a.path} にバイト列も参照もありません`);
+        return {
           kind: a.kind,
           path: a.path,
           mime: a.mime,
           sha256: a.sha256,
-          size: a.bytes.length,
-          bytes: a.bytes,
-        }));
-        return {
-          id: row.id,
-          revision: row.revision,
-          ...(await readContent(tx, row)),
-          assets: data,
+          size: bytes.length,
+          bytes,
+          ...(ref ? { ref } : {}),
         };
       });
+      return { id: loaded.row.id, revision: loaded.row.revision, ...loaded.content, assets: data };
     },
 
     async replace(id, baseRevision, content) {
+      const refs = content.assets
+        ? await refsFor(content, await readKnownRefs(db, id))
+        : new Map<string, BlobRef>();
       return db.transaction(async (tx) => {
         // 条件付き UPDATE が判定と更新を兼ねる。同じ行への2つ目の更新は
         // 1つ目のコミットを待ってから条件を評価し直すので、片方だけが通る。
@@ -220,12 +297,19 @@ export function createPgRepository(db: Db): BookRepository {
         await tx.delete(chapters).where(eq(chapters.bookId, id));
         await tx.delete(bookEditions).where(eq(bookEditions.bookId, id));
         if (content.assets) await tx.delete(assets).where(eq(assets.bookId, id));
-        await insertChildren(tx, id, content);
+        await insertChildren(tx, id, content, refs);
         return { ok: true as const, revision: updated[0]!.revision };
       });
     },
 
     async addVersion(bookId, version) {
+      // 資産ファイルを除いた .postext を DB に、ファイルは参照にして保存する。
+      const split = await splitBookBundle(version.bundle);
+      const refs = await resolveAssetRefs(
+        blobs(),
+        split.assets.map((a) => ({ path: a.path, mime: a.mime, bytes: a.bytes })),
+        await readKnownRefs(db, bookId),
+      );
       return db.transaction(async (tx) => {
         // 版番号の採番を直列化するため、書籍の行を先にロックする。
         const locked = await tx
@@ -240,8 +324,25 @@ export function createPgRepository(db: Db): BookRepository {
           .where(eq(bookVersions.bookId, bookId));
         const [row] = await tx
           .insert(bookVersions)
-          .values({ bookId, number: latest + 1, ...version })
+          .values({ bookId, number: latest + 1, ...version, bundle: Buffer.from(split.stripped) })
           .returning(versionColumns);
+        if (split.assets.length > 0) {
+          await tx.insert(bookVersionAssets).values(
+            split.assets.map((a) => {
+              const ref = refs.get(a.path)!;
+              return {
+                versionId: row!.id,
+                path: a.path,
+                kind: a.kind,
+                mime: a.mime,
+                sha256: ref.sha256,
+                storage: ref.storage,
+                objectKey: ref.key,
+                size: ref.size,
+              };
+            }),
+          );
+        }
         return row!;
       });
     },
@@ -258,10 +359,21 @@ export function createPgRepository(db: Db): BookRepository {
 
     async getVersionBundle(bookId, versionId) {
       const [row] = await db
-        .select({ bundle: bookVersions.bundle })
+        .select({ id: bookVersions.id, bundle: bookVersions.bundle })
         .from(bookVersions)
         .where(and(eq(bookVersions.bookId, bookId), eq(bookVersions.id, versionId)));
-      return row?.bundle ?? null;
+      if (!row) return null;
+      const files = await db
+        .select()
+        .from(bookVersionAssets)
+        .where(eq(bookVersionAssets.versionId, row.id));
+      // 参照を持たない版（R2 移行前の、ファイルを含んだままの .postext）はそのまま返す。
+      if (files.length === 0) return row.bundle;
+      const loaded = await mapLimit(files, BYTE_FETCH_CONCURRENCY, async (f) => {
+        const ref = refOfRow(f)!;
+        return [f.path, await blobs().get(ref)] as const;
+      });
+      return Buffer.from(joinZipFiles(row.bundle, new Map(loaded)));
     },
   };
 }
@@ -273,7 +385,7 @@ async function readAssetMetas(db: Db | Tx, bookId: string): Promise<AssetMeta[]>
       path: assets.path,
       mime: assets.mime,
       sha256: assets.sha256,
-      size: sql<number>`octet_length(${assets.bytes})::int`,
+      size: assets.size,
     })
     .from(assets)
     .where(eq(assets.bookId, bookId))
