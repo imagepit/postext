@@ -274,9 +274,11 @@ function processLines(lines: string[], ctx: Ctx): string[] {
         const title = (dm[2] ?? "").trim();
         blank();
         if (name === "step") {
-          // 手順は「! 題」の太字行に続けて、題なしの step 囲みを開く。項目は step-item の入れ子の囲みになる。
-          out.push(`**! ${(title || "作業手順").replace(/\s+/g, " ")}**`);
-          blank();
+          // 手順は題なしの step 囲みを開き、項目は step-item の入れ子の囲みになる。題があるときだけ、囲みの前に太字の行で出す。
+          if (title) {
+            out.push(`**${title.replace(/\s+/g, " ")}**`);
+            blank();
+          }
           out.push(':::callout{type="step"}');
           ctx.inStep = true;
           ctx.stepItemOpen = false;

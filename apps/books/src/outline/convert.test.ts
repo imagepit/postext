@@ -22,7 +22,7 @@ describe("git-basics の変換", () => {
   });
 
   it("3. note / syntax / step は callout になり、閉じの ::: はそのまま", () => {
-    expect(lines).toContain("**! 作業手順**");
+    expect(lines).not.toContain("**! 作業手順**");
     expect(lines).toContain(':::callout{type="step"}');
     expect(lines).toContain(':::callout{type="syntax" label="ローカルリポジトリの初期化"}');
     expect(lines).toContain(':::callout{type="note" label=".gitフォルダについて"}');
@@ -142,9 +142,9 @@ describe("個別の規則", () => {
     expect(convert(":::caution 注意点\nx\n:::\n").markdown).toContain(':::callout{type="caution" label="注意点"}');
   });
 
-  it("title なしの :::step は「! 作業手順」の太字行を付け、題があればその題を使う。番号なしなら外側の囲みと本文だけ", () => {
-    expect(convert(":::step\nx\n:::\n").markdown).toBe('**! 作業手順**\n\n:::callout{type="step"}\nx\n:::\n');
-    expect(convert(":::step 準備\nx\n:::\n").markdown).toContain('**! 準備**\n\n:::callout{type="step"}');
+  it("title なしの :::step は見出し行を付けず、題があればその題を太字の行で出す。番号なしなら外側の囲みと本文だけ", () => {
+    expect(convert(":::step\nx\n:::\n").markdown).toBe(':::callout{type="step"}\nx\n:::\n');
+    expect(convert(":::step 準備\nx\n:::\n").markdown).toContain('**準備**\n\n:::callout{type="step"}');
     expect(convert(":::step 準備\nx\n:::\n").markdown).not.toContain("label=");
   });
 
@@ -152,8 +152,6 @@ describe("個別の規則", () => {
     const md = convert(":::step\n\n1. フォルダの作成\n\n   本文です。\n\n2. 次の手順\n:::\n\n1. 通常の項目\n2. もう一つ\n").markdown;
     expect(md).toBe(
       [
-        "**! 作業手順**",
-        "",
         ':::callout{type="step"}',
         ':::callout{type="step-item" label="1"}',
         "",
