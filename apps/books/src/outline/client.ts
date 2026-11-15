@@ -20,6 +20,35 @@ export interface OutlineBrowseItem {
 export interface OutlineAttachment {
   bytes: Uint8Array;
   contentType: string;
+  /**
+   * 最後のリダイレクト先が R2 の署名付き URL のとき、outline バケット内のオブジェクト鍵。
+   * 読み取れなければ省く（呼び出し側は自前のバケットへ保存する）。
+   */
+  objectKey?: string;
+}
+
+const R2_HOST_SUFFIX = ".r2.cloudflarestorage.com";
+
+/**
+ * `https://<account>.r2.cloudflarestorage.com/<bucket>/<key>?X-Amz-...` から `<key>`（URL デコード済み）を取り出す。
+ * ホストが R2 でない、先頭のパスがバケット名と違う、鍵が空なら undefined。
+ */
+export function outlineObjectKeyFromUrl(url: string, bucket = "outline-originals"): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return undefined;
+  }
+  if (!parsed.hostname.endsWith(R2_HOST_SUFFIX)) return undefined;
+  const segments = parsed.pathname.split("/").slice(1);
+  if (segments[0] !== bucket || segments.length < 2) return undefined;
+  try {
+    const key = segments.slice(1).map(decodeURIComponent).join("/");
+    return key === "" ? undefined : key;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface OutlineClient {
@@ -162,7 +191,12 @@ export function createOutlineClient(config: OutlineConfig, fetchFn: FetchFn = fe
         if (!response.ok) throw new OutlineHttpError(response.status, "attachments.redirect");
         const bytes = new Uint8Array(await response.arrayBuffer());
         if (bytes.length > MAX_ATTACHMENT_BYTES) throw new Error("添付ファイルが大きすぎます");
-        return { bytes, contentType: response.headers.get("content-type") ?? "" };
+        const objectKey = outlineObjectKeyFromUrl(url, process.env.R2_OUTLINE_BUCKET?.trim() || undefined);
+        return {
+          bytes,
+          contentType: response.headers.get("content-type") ?? "",
+          ...(objectKey ? { objectKey } : {}),
+        };
       }
       throw new Error("リダイレクトが多すぎます");
     },

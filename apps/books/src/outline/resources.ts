@@ -175,6 +175,8 @@ export function buildTableResource(table: ConvertedTable, now: number): Record<s
 export interface FetchedAttachment {
   bytes: Uint8Array;
   contentType: string;
+  /** outline バケット内の鍵。分かれば保存時に Outline の原本を参照する。 */
+  objectKey?: string;
 }
 
 export interface BuiltResources {
@@ -203,6 +205,7 @@ export async function buildResources(
           fetched.set(image.attachmentId, null);
         } else {
           fetched.set(image.attachmentId, { header, bytes: file.bytes });
+          const outlineKey = file.objectKey;
           const bytes = Buffer.from(file.bytes);
           const path = assetPathOf(image.attachmentId, header.ext);
           assets.set(path, {
@@ -212,6 +215,7 @@ export async function buildResources(
             bytes,
             sha256: sha256Hex(bytes),
             size: bytes.length,
+            ...(outlineKey ? { outlineKey } : {}),
           });
         }
       } catch (error) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createOutlineClient, outlineConfigFromEnv, OutlineHttpError } from "./client";
+import { createOutlineClient, outlineConfigFromEnv, OutlineHttpError, outlineObjectKeyFromUrl } from "./client";
 import type { FetchFn } from "./client";
 
 const config = { baseUrl: "https://outline.example", token: "tok" };
@@ -57,5 +57,40 @@ describe("outline client", () => {
       { url: "https://outline.example/api/attachments.redirect?id=a%20b", auth: "Bearer tok" },
       { url: "https://files.example/signed?x=1", auth: undefined },
     ]);
+  });
+});
+
+describe("outlineObjectKeyFromUrl", () => {
+  const host = "https://acct.r2.cloudflarestorage.com";
+  it("R2 の署名付き URL から outline バケット内の鍵（URL デコード済み）を取り出す", () => {
+    expect(outlineObjectKeyFromUrl(`${host}/outline-originals/uploads/u1/a1/${encodeURIComponent("図 1.png")}?X-Amz-Signature=x`)).toBe("uploads/u1/a1/図 1.png");
+  });
+  it("R2 でないホスト、別のバケット、鍵なし、壊れた URL は undefined", () => {
+    expect(outlineObjectKeyFromUrl("https://files.example/outline-originals/k?x=1")).toBeUndefined();
+    expect(outlineObjectKeyFromUrl(`${host}/other-bucket/k`)).toBeUndefined();
+    expect(outlineObjectKeyFromUrl(`${host}/outline-originals/`)).toBeUndefined();
+    expect(outlineObjectKeyFromUrl(`${host}/outline-originals`)).toBeUndefined();
+    expect(outlineObjectKeyFromUrl("not a url")).toBeUndefined();
+    expect(outlineObjectKeyFromUrl(`${host}/outline-originals/%E0%A4%A`)).toBeUndefined();
+  });
+  it("バケット名は引数で変えられる", () => {
+    expect(outlineObjectKeyFromUrl(`${host}/b2/k.png`, "b2")).toBe("k.png");
+  });
+});
+
+describe("fetchAttachment の objectKey", () => {
+  const signed = "https://acct.r2.cloudflarestorage.com/outline-originals/uploads/u/a/x.png?X-Amz-Signature=s";
+  const fetchTo = (target: string): FetchFn => async (url) =>
+    url.startsWith("https://outline.example")
+      ? new Response(null, { status: 302, headers: { location: target } })
+      : new Response(new Uint8Array([9]), { status: 200 });
+
+  it("最後のリダイレクト先が R2 なら objectKey を返す", async () => {
+    const file = await createOutlineClient(config, fetchTo(signed)).fetchAttachment("a");
+    expect(file.objectKey).toBe("uploads/u/a/x.png");
+  });
+  it("R2 でなければ objectKey を持たない", async () => {
+    const file = await createOutlineClient(config, fetchTo("https://files.example/signed?x=1")).fetchAttachment("a");
+    expect("objectKey" in file).toBe(false);
   });
 });
