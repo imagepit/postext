@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { BlobRef } from "@/storage/blobStore";
 
 export type AssetKind = "resource" | "font";
 
@@ -18,6 +19,10 @@ export interface AssetMeta {
 
 export interface AssetData extends AssetMeta {
   bytes: Buffer;
+  /** すでに R2 にある参照。読み出した資産を書き戻すときに、再アップロードを避けるために付く。 */
+  ref?: BlobRef;
+  /** Outline の添付なら outline バケット内の鍵。保存時に outline 参照になる。 */
+  outlineKey?: string;
 }
 
 /** 主言語以外の言語の版。主言語の題名・設定・資源は BookContent 本体にある。 */
