@@ -22,10 +22,11 @@ describe("git-basics の変換", () => {
   });
 
   it("3. note / syntax / step は callout になり、閉じの ::: はそのまま", () => {
-    expect(lines).toContain(':::callout{type="step" label="作業手順"}');
+    expect(lines).not.toContain("**! 作業手順**");
+    expect(lines).toContain(':::callout{type="step"}');
     expect(lines).toContain(':::callout{type="syntax" label="ローカルリポジトリの初期化"}');
     expect(lines).toContain(':::callout{type="note" label=".gitフォルダについて"}');
-    // callout の閉じ 3 つ + step-item 段落の閉じ 2 つ
+    // callout の閉じ 3 つ + step-item の閉じ 2 つ
     expect(lines.filter((l) => l === ":::")).toHaveLength(5);
   });
 
@@ -90,13 +91,14 @@ describe("git-basics の変換", () => {
   });
 
   it("8. 続きを持つ番号付き項目は1項目ずつの番号付きリストになり、続きは項目の外へ出る", () => {
-    // :::step の中なので番号付きリストではなく、丸数字の step-item 段落になる
-    const i1 = lines.indexOf("① フォルダの作成") + 1;
-    const i2 = lines.indexOf("② Gitリポジトリを作成") + 1;
-    expect(lines[i1 - 2]).toBe(':::paragraphs{style="step-item"}');
-    expect(lines[i1]).toBe(":::");
+    // :::step の中なので番号付きリストではなく、label に番号を持つ step-item の囲みになる
+    const i1 = lines.indexOf("**フォルダの作成**");
+    const i2 = lines.indexOf("**Gitリポジトリを作成**");
     expect(i1).toBeGreaterThan(-1);
     expect(i2).toBeGreaterThan(i1);
+    expect(lines[i1 - 2]).toBe(':::callout{type="step-item" label="1"}');
+    expect(lines[i2 - 2]).toBe(':::callout{type="step-item" label="2"}');
+    expect(lines[i2 - 3]).toBe(":::");
     // 項目の後ろに続きが字下げなしで並ぶ
     expect(lines[i1 + 1]).toBe("");
     expect(lines[i1 + 2]).toBe("まずは任意の場所（デスクトップなど）に「git-text」という名前のフォルダを作成します。");
@@ -140,26 +142,49 @@ describe("個別の規則", () => {
     expect(convert(":::caution 注意点\nx\n:::\n").markdown).toContain(':::callout{type="caution" label="注意点"}');
   });
 
-  it("title なしの :::step は label=\"作業手順\" を付け、題があればその題を使う", () => {
-    expect(convert(":::step\nx\n:::\n").markdown).toBe(':::callout{type="step" label="作業手順"}\nx\n\n:::\n');
-    expect(convert(":::step 準備\nx\n:::\n").markdown).toContain(':::callout{type="step" label="準備"}');
+  it("title なしの :::step は見出し行を付けず、題があればその題を太字の行で出す。番号なしなら外側の囲みと本文だけ", () => {
+    expect(convert(":::step\nx\n:::\n").markdown).toBe(':::callout{type="step"}\nx\n:::\n');
+    expect(convert(":::step 準備\nx\n:::\n").markdown).toContain('**準備**\n\n:::callout{type="step"}');
+    expect(convert(":::step 準備\nx\n:::\n").markdown).not.toContain("label=");
   });
 
-  it(":::step の番号付き項目は丸数字の step-item 段落になり、続きの本文は項目の外へ出る", () => {
+  it(":::step の番号付き項目は step-item の囲みになり、続きの本文は囲みの中に残る", () => {
     const md = convert(":::step\n\n1. フォルダの作成\n\n   本文です。\n\n2. 次の手順\n:::\n\n1. 通常の項目\n2. もう一つ\n").markdown;
-    expect(md).toContain(':::paragraphs{style="step-item"}\n① フォルダの作成\n:::');
-    expect(md).toContain(':::paragraphs{style="step-item"}\n② 次の手順\n:::');
-    expect(md).toContain("\n本文です。\n");
-    expect(md).not.toMatch(/^1\. フォルダの作成/m);
-    // 囲みの外の番号付きリストはそのまま
-    expect(md).toContain("1. 通常の項目\n2. もう一つ");
+    expect(md).toBe(
+      [
+        ':::callout{type="step"}',
+        ':::callout{type="step-item" label="1"}',
+        "",
+        "**フォルダの作成**",
+        "",
+        "本文です。",
+        ":::",
+        ':::callout{type="step-item" label="2"}',
+        "",
+        "**次の手順**",
+        ":::",
+        ":::",
+        "",
+        "1. 通常の項目",
+        "2. もう一つ",
+        "",
+      ].join("\n"),
+    );
+    expect(md).not.toContain("step-item\"}\n①");
+    expect(md).not.toContain("paragraphs");
   });
 
-  it("21 番目以降の手順項目は (21) になる", () => {
+  it("コードフェンス内の番号付き行は項目にならない", () => {
+    const md = convert(":::step\n1. 実行\n\n   ```bash\n   1. x\n   ```\n:::\n").markdown;
+    expect(md.match(/step-item/g)).toHaveLength(1);
+    expect(md).toContain("```bash\n1. x\n```");
+  });
+
+  it("21 番目以降の手順項目も数字のまま label になる", () => {
     const items = Array.from({ length: 21 }, (_, k) => `${k + 1}. s${k + 1}\n`).join("");
     const md = convert(`:::step\n${items}:::\n`).markdown;
-    expect(md).toContain("⑳ s20");
-    expect(md).toContain("(21) s21");
+    expect(md).toContain(':::callout{type="step-item" label="20"}\n\n**s20**');
+    expect(md).toContain(':::callout{type="step-item" label="21"}\n\n**s21**');
   });
 
   it("callout の題は title ではなく label 属性になる（note / syntax / caution、波括弧は全角にする）", () => {

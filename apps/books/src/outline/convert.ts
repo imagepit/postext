@@ -43,8 +43,10 @@ interface Ctx {
   tables: ConvertedTable[];
   warnings: string[];
   warned: Set<string>;
-  /** :::step の内側にいる間は true。番号付き項目を番号付きリストにせず、丸数字の段落にする。 */
+  /** :::step の内側にいる間は true。番号付き項目を番号付きリストにせず、step-item の囲みにする。 */
   inStep: boolean;
+  /** step-item の囲みを開いている間は true。次の項目か :::step の閉じで閉じる。 */
+  stepItemOpen: boolean;
 }
 
 const CALLOUT_TYPES = new Set(["note", "syntax", "step", "caution"]);
@@ -59,11 +61,12 @@ const TEMPLATE_TAG = /\{\{[^}]*\}\}/g;
 const TABLE_SEPARATOR = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 const ITALIC_ONLY = /^\s*\*([^*\s](?:[^*]*[^*\s])?)\*\s*$/;
 
-const CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";
-
-/** 1〜20 は丸数字、それ以外は「(21)」。 */
-export function circledNumber(n: number): string {
-  return n >= 1 && n <= 20 ? CIRCLED[n - 1]! : `(${n})`;
+/** 開いている step-item があれば、直前の空行を除いて閉じる。 */
+function closeStepItem(out: string[], ctx: Ctx): void {
+  if (!ctx.stepItemOpen) return;
+  while (out.length > 0 && out[out.length - 1] === "") out.pop();
+  out.push(":::");
+  ctx.stepItemOpen = false;
 }
 
 const warn = (ctx: Ctx, message: string, once = false): void => {
@@ -270,9 +273,18 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       if (CALLOUT_TYPES.has(name)) {
         const title = (dm[2] ?? "").trim();
         blank();
-        const labelText = title || (name === "step" ? "作業手順" : "");
-        out.push(`:::callout{type="${name}"${labelText ? ` label=${attrValue(labelText)}` : ""}}`);
-        if (name === "step") ctx.inStep = true;
+        if (name === "step") {
+          // 手順は題なしの step 囲みを開き、項目は step-item の入れ子の囲みになる。題があるときだけ、囲みの前に太字の行で出す。
+          if (title) {
+            out.push(`**${title.replace(/\s+/g, " ")}**`);
+            blank();
+          }
+          out.push(':::callout{type="step"}');
+          ctx.inStep = true;
+          ctx.stepItemOpen = false;
+        } else {
+          out.push(`:::callout{type="${name}"${title ? ` label=${attrValue(title)}` : ""}}`);
+        }
         i++;
         continue;
       }
@@ -282,7 +294,14 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       continue;
     }
     if (trimmed === ":::") {
-      ctx.inStep = false;
+      if (ctx.inStep) {
+        closeStepItem(out, ctx);
+        ctx.inStep = false;
+        out.push(":::");
+        blank();
+        i++;
+        continue;
+      }
       blank();
       out.push(":::");
       blank();
@@ -342,12 +361,16 @@ function processLines(lines: string[], ctx: Ctx): string[] {
         !itemImages &&
         cont.every((l) => l.trim() === "" || (NESTED_LIST_LINE.test(l) && !IMAGE_ONE.test(l) && !l.includes("|")));
       if (stepItem) {
-        // 手順の項目は番号付きリストにせず、丸数字で始まる段落（段落スタイル step-item）にする。
+        // 手順の項目は番号付きリストにせず、番号を label に持つ step-item の囲みにして、題を太字で先頭に置く。
         const dedentedStep = cont.map((l) => l.slice(Math.min(markerWidth, leadingSpaces(l))));
         const stepImages = (itemImages ?? []).flatMap((s) => ("resourceId" in s ? [`::resource{id="${s.resourceId}"}`] : []));
+        closeStepItem(out, ctx);
+        while (out.length > 0 && out[out.length - 1] === "") out.pop();
+        out.push(`:::callout{type="step-item" label="${om![1]}"}`);
         blank();
-        out.push(':::paragraphs{style="step-item"}', `${circledNumber(Number(om![1]))} ${headText.trim() || "画像"}`, ":::");
+        out.push(`**${headText.trim() || "画像"}**`);
         blank();
+        ctx.stepItemOpen = true;
         for (const r of stepImages) {
           out.push(r);
           blank();
@@ -355,7 +378,6 @@ function processLines(lines: string[], ctx: Ctx): string[] {
         ctx.inStep = false;
         out.push(...processLines(dedentedStep, ctx));
         ctx.inStep = true;
-        blank();
         i = end + 1;
         continue;
       }
@@ -445,6 +467,7 @@ export function convertOutlineMarkdown(text: string, options: ConvertOptions): C
     warnings: [],
     warned: new Set(),
     inStep: false,
+    stepItemOpen: false,
   };
   const lines = stripLeadingYaml(text.replace(/\r\n?/g, "\n").split("\n"));
   const out = processLines(lines, ctx);
