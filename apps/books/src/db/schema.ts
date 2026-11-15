@@ -77,8 +77,12 @@ export const assets = pgTable(
     kind: text("kind").$type<"resource" | "font">().notNull(),
     path: text("path").notNull(),
     mime: text("mime").notNull(),
-    bytes: bytea("bytes").notNull(),
+    // R2 への移行前の行だけがバイト列を持つ。移行後は NULL で、storage/object_key が参照先。
+    bytes: bytea("bytes"),
     sha256: text("sha256").notNull(),
+    storage: text("storage").$type<"outline" | "postext">(),
+    objectKey: text("object_key"),
+    size: integer("size").notNull().default(0),
   },
   (t) => [unique("assets_book_path").on(t.bookId, t.path)],
 );
@@ -102,6 +106,25 @@ export const bookVersions = pgTable(
   ],
 );
 
+// 版に含まれる画像・フォント。bookVersions.bundle はこれらを除いた .postext。
+export const bookVersionAssets = pgTable(
+  "book_version_assets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => bookVersions.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    kind: text("kind").$type<"resource" | "font">().notNull(),
+    mime: text("mime").notNull(),
+    sha256: text("sha256").notNull(),
+    storage: text("storage").$type<"outline" | "postext">().notNull(),
+    objectKey: text("object_key").notNull(),
+    size: integer("size").notNull(),
+  },
+  (t) => [unique("book_version_assets_version_path").on(t.versionId, t.path)],
+);
+
 // エディタの「デザインを保存」で保存したデザイン。書籍とは独立に残る。
 export const designs = pgTable("designs", {
   // クライアントが作った id（design-xxxx）。
@@ -111,9 +134,28 @@ export const designs = pgTable("designs", {
   // 保存元の書籍の名前。
   source: text("source"),
   parts: jsonb("parts").$type<DesignPart[]>().notNull(),
-  // postext の createDesignBundle が作った .postext をそのまま保存する。
+  // postext の createDesignBundle が作った .postext から、フォントなどのファイルを除いたもの。
+  // 除いたファイルは designAssets にある。
   bytes: bytea("bytes").notNull(),
   // SavedDesign.createdAt/updatedAt（ミリ秒）をそのまま往復させる。
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 });
+
+export const designAssets = pgTable(
+  "design_assets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    designId: text("design_id")
+      .notNull()
+      .references(() => designs.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    kind: text("kind").$type<"resource" | "font">().notNull(),
+    mime: text("mime").notNull(),
+    sha256: text("sha256").notNull(),
+    storage: text("storage").$type<"outline" | "postext">().notNull(),
+    objectKey: text("object_key").notNull(),
+    size: integer("size").notNull(),
+  },
+  (t) => [unique("design_assets_design_path").on(t.designId, t.path)],
+);
