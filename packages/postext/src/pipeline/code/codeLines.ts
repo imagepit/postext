@@ -76,7 +76,9 @@ export function codeFenceSettings(block: ContentBlock, cs: ResolvedCodeStyleConf
 type AnnotationRole = 'plain' | 'arrow' | 'note';
 
 /** A marker (`<--`, `v--`, `^--`) directly followed by `[note]`. */
-const ANNOTATION_RE = /(<--|v--|\^--)\[([^\]]*)\]/g;
+/** A comment mark (`//` or `#`) and the blanks right before a marker go with it (CORE-213):
+ *  the arrow stands for the comment, so `x(); // <--[note]` prints `x(); ⟵note`. */
+const ANNOTATION_RE = /(?:(?:\/\/|#)[ \t]*)?(<--|v--|\^--)\[([^\]]*)\]/g;
 const ANNOTATION_ARROWS: Readonly<Record<string, string>> = { '<--': '\u27F5', 'v--': '\u2B10', '^--': '\u2B11' };
 
 /** The highlighter's pieces of one line, split at its annotations (CORE-213):
@@ -84,10 +86,11 @@ const ANNOTATION_ARROWS: Readonly<Record<string, string>> = { '<--': '\u27F5', '
  *  role, and the brackets go. Text outside keeps its token and colour. A
  *  line with no annotation comes back as it was. */
 function annotatePieces(pieces: readonly CodeToken[], line: string): Array<CodeToken & { role: AnnotationRole }> {
-  const marks: Array<{ start: number; end: number; arrow: string; noteStart: number; noteEnd: number }> = [];
+  const marks: Array<{ start: number; end: number; arrowAt: number; arrow: string; noteStart: number; noteEnd: number }> = [];
   for (const m of line.matchAll(ANNOTATION_RE)) {
     const start = m.index!;
-    marks.push({ start, end: start + m[0].length, arrow: ANNOTATION_ARROWS[m[1]!]!, noteStart: start + 4, noteEnd: start + 4 + m[2]!.length });
+    const arrowAt = start + m[0].length - m[1]!.length - m[2]!.length - 2; // the marker, `[`, the note, `]`
+    marks.push({ start, end: start + m[0].length, arrowAt, arrow: ANNOTATION_ARROWS[m[1]!]!, noteStart: arrowAt + 4, noteEnd: arrowAt + 4 + m[2]!.length });
   }
   if (marks.length === 0) return pieces.map((p) => ({ ...p, role: 'plain' as const }));
   const out: Array<CodeToken & { role: AnnotationRole }> = [];
@@ -106,9 +109,9 @@ function annotatePieces(pieces: readonly CodeToken[], line: string): Array<CodeT
       let next: AnnotationRole = 'plain';
       let ch: string = text[i]!;
       if (mark) {
-        if (pos === mark.start) { next = 'arrow'; ch = mark.arrow; }
+        if (pos === mark.arrowAt) { next = 'arrow'; ch = mark.arrow; }
         else if (pos >= mark.noteStart && pos < mark.noteEnd) next = 'note';
-        else continue; // the rest of the marker and the brackets
+        else continue; // the comment mark, the rest of the marker and the brackets
       }
       if (next !== role) { flush(); role = next; }
       chunk += ch;
