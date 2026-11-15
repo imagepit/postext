@@ -47,6 +47,12 @@ describe('codeStyle.annotations', () => {
     expect(line!.bbox.width).toBeCloseTo(line!.text.split('').reduce((w, c) => w + (c === ' ' ? 4 : 7), 0), 5);
   });
 
+  it('gives a bolded run the code colour, not the body bold colour', () => {
+    const cs = { annotations: true, highlightBold: true, color: { hex: '#fafafa', model: 'hex' as const } };
+    const [note, hl] = linesOf(['// <--[the note]', 'b();'], cs, ' {highlight="2"}');
+    expect(segs(note!).find((s) => s.text === 'the note')!.color).toBe('#fafafa');
+    expect(segs(hl!).filter((s) => s.kind === 'text').every((s) => s.color === '#fafafa')).toBe(true);
+  });
   it('knows the three markers and several to a line', () => {
     const lines = linesOf(['v--[down]', '^--[up]', 'a <--[one] b ^--[two]'], { annotations: true });
     expect(lines.map((l) => l.text)).toEqual(['⬐down', '⬑up', 'a ⟵one b ⬑two']);

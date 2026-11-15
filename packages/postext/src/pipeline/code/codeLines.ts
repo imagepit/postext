@@ -215,7 +215,9 @@ export function measureCodeLines(input: CodeLinesInput): MeasuredCode {
       const bold = look?.bold === true || piece.role === 'note' || lineBold;
       const italic = look?.italic === true;
       const font = bold ? (italic ? faces.boldItalic : faces.bold) : italic ? faces.italic : faces.normal;
-      const color = piece.color ?? look?.color?.hex;
+      // A run bolded by an annotation or a highlighted line keeps the code's colour: unset, the painters
+      // would give it the body's bold colour.
+      const color = piece.color ?? look?.color?.hex ?? (bold && look?.bold !== true ? cs.color.hex : undefined);
       let text = '';
       const flush = () => {
         if (text.length === 0) return;
