@@ -29,6 +29,13 @@
       "when": 1794739375807,
       "tag": "0003_r2_asset_refs",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794742710770,
+      "tag": "0004_drop_asset_bytes",
+      "breakpoints": true
     }
   ]
 }

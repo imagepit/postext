@@ -77,11 +77,10 @@ export const assets = pgTable(
     kind: text("kind").$type<"resource" | "font">().notNull(),
     path: text("path").notNull(),
     mime: text("mime").notNull(),
-    // R2 への移行前の行だけがバイト列を持つ。移行後は NULL で、storage/object_key が参照先。
-    bytes: bytea("bytes"),
+    // 中身は持たない。storage/object_key が R2 の参照先（CORE-215）。
     sha256: text("sha256").notNull(),
-    storage: text("storage").$type<"outline" | "postext">(),
-    objectKey: text("object_key"),
+    storage: text("storage").$type<"outline" | "postext">().notNull(),
+    objectKey: text("object_key").notNull(),
     size: integer("size").notNull().default(0),
   },
   (t) => [unique("assets_book_path").on(t.bookId, t.path)],
