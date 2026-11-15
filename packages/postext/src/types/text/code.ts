@@ -125,6 +125,14 @@ export interface CodeStyleConfig {
   /** The tint behind the lines a fence's `highlight="3,5-7"` names.
    *  Default `#fff4c2`. */
   highlightBackground?: ColorValue;
+  /** Read `<--[note]`, `v--[note]` and `^--[note]` in a code line as an
+   *  annotation (CORE-213): the marker is set as an arrow (`⟵`, `⬐`, `⬑`)
+   *  and the note after it in bold, without its brackets. Default `false`
+   *  (the text is set as written). */
+  annotations?: boolean;
+  /** Set the lines a fence's `highlight="3,5-7"` names in bold
+   *  (CORE-213). Default `false`. */
+  highlightBold?: boolean;
   /** Default `false`: a listing splits between lines across columns and
    *  pages. */
   keepTogether?: boolean;
@@ -200,6 +208,8 @@ export interface ResolvedCodeStyleConfig {
   lineNumberColor: ColorValue;
   lineNumberGap: Dimension;
   highlightBackground: ColorValue;
+  annotations: boolean;
+  highlightBold: boolean;
   keepTogether: boolean;
   splitMinLines: number;
   repeatTitle: boolean;

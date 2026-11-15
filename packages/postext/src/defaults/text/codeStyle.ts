@@ -47,6 +47,8 @@ export const DEFAULT_CODE_STYLE: Omit<ResolvedCodeStyleConfig, 'color' | 'tokens
   lineNumberColor: { hex: '#8a8a8a', model: 'hex' },
   lineNumberGap: { value: 1, unit: 'em' },
   highlightBackground: { hex: '#fff4c2', model: 'hex' },
+  annotations: false,
+  highlightBold: false,
   keepTogether: false,
   splitMinLines: 2,
   repeatTitle: false,
@@ -159,6 +161,8 @@ export function resolveCodeStyleConfig(partial: CodeStyleConfig | undefined, bod
     lineNumberColor: p.lineNumberColor ?? D.lineNumberColor,
     lineNumberGap: p.lineNumberGap ?? D.lineNumberGap,
     highlightBackground: p.highlightBackground ?? D.highlightBackground,
+    annotations: p.annotations === true,
+    highlightBold: p.highlightBold === true,
     keepTogether: p.keepTogether === true,
     splitMinLines: Math.floor(atLeast(p.splitMinLines, 1, D.splitMinLines)),
     repeatTitle: p.repeatTitle === true,
@@ -232,6 +236,8 @@ export function stripCodeStyleDefaults(codeStyle?: CodeStyleConfig): CodeStyleCo
   if (col(codeStyle.lineNumberColor, D.lineNumberColor)) out.lineNumberColor = codeStyle.lineNumberColor;
   if (dim(codeStyle.lineNumberGap, D.lineNumberGap)) out.lineNumberGap = codeStyle.lineNumberGap;
   if (col(codeStyle.highlightBackground, D.highlightBackground)) out.highlightBackground = codeStyle.highlightBackground;
+  if (codeStyle.annotations !== undefined && codeStyle.annotations !== D.annotations) out.annotations = codeStyle.annotations;
+  if (codeStyle.highlightBold !== undefined && codeStyle.highlightBold !== D.highlightBold) out.highlightBold = codeStyle.highlightBold;
   if (codeStyle.keepTogether !== undefined && codeStyle.keepTogether !== D.keepTogether) out.keepTogether = codeStyle.keepTogether;
   if (codeStyle.splitMinLines !== undefined && codeStyle.splitMinLines !== D.splitMinLines) out.splitMinLines = codeStyle.splitMinLines;
   if (codeStyle.repeatTitle !== undefined && codeStyle.repeatTitle !== D.repeatTitle) out.repeatTitle = codeStyle.repeatTitle;
