@@ -48,6 +48,8 @@ docker run --rm -p 3000:3000 imagepit/postext:local
 
 ## 上流の新しい版へ追従する
 
+上流から変えた箇所と、版を上げるときに衝突しやすい点・確かめることは [IMAGEPIT-PATCHES.md](IMAGEPIT-PATCHES.md) にまとめています。追従の前に読みます。
+
 1. 上流を取得します。`git fetch upstream --tags`
 2. 新しいタグから次の既定ブランチを作ります。`git switch -c imagepit-v<新しい版> v<新しい版>`
 3. 現在の既定ブランチにある自社のコミットを載せ替えます。`git cherry-pick v<現在の版>..imagepit-v<現在の版>`
