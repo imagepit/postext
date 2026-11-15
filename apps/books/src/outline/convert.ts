@@ -50,6 +50,8 @@ interface Ctx {
 }
 
 const CALLOUT_TYPES = new Set(["note", "syntax", "step", "caution"]);
+const TERMINAL_COMMAND_LANGS = new Set(["bash", "sh", "shell", "zsh"]);
+const TERMINAL_OUTPUT_LANGS = new Set(["bash-output", "bash-stdout"]);
 const FENCE_OPEN = /^(\s*)(`{3,}|~{3,})\s*(.*)$/;
 const ORDERED = /^(\d+)([.)])\s+(.*)$/;
 const BULLET = /^([*+-])\s+(.*)$/;
@@ -209,22 +211,26 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       const closer = new RegExp(`^\\s*${marker[0] === "`" ? "`" : "~"}{${marker.length},}\\s*$`);
       while (j < lines.length && !closer.test(lines[j]!)) j++;
       if (j >= lines.length) warn(ctx, "閉じていないコードブロックがありました");
-      const code: string[] = [];
-      const highlight: number[] = [];
-      let inAdd = false;
-      let deleted = false;
-      for (const raw of lines.slice(i + 1, j)) {
-        const body = raw.slice(Math.min(indent, leadingSpaces(raw)));
-        const t = body.trim();
-        if (t === "//addstart") inAdd = true;
-        else if (t === "//addend") inAdd = false;
-        else if (t === "//delstart" || t === "//delend") deleted = true;
-        else {
-          code.push(body);
-          if (inAdd) highlight.push(code.length);
+      const readBody = (from: number, to: number, ind: number) => {
+        const code: string[] = [];
+        const highlight: number[] = [];
+        let inAdd = false;
+        let deleted = false;
+        for (const raw of lines.slice(from, to)) {
+          const body = raw.slice(Math.min(ind, leadingSpaces(raw)));
+          const t = body.trim();
+          if (t === "//addstart") inAdd = true;
+          else if (t === "//addend") inAdd = false;
+          else if (t === "//delstart" || t === "//delend") deleted = true;
+          else {
+            code.push(body);
+            if (inAdd) highlight.push(code.length);
+          }
         }
-      }
-      if (deleted) warn(ctx, "//delstart〜//delend の範囲は削除表示にできないため、行を残してマーカーだけ取り除きました");
+        if (deleted) warn(ctx, "//delstart〜//delend の範囲は削除表示にできないため、行を残してマーカーだけ取り除きました");
+        return { code, highlight };
+      };
+      const { code, highlight } = readBody(i + 1, j, indent);
       let lang = "";
       let rest = info;
       if (info && !info.startsWith("{")) {
@@ -234,9 +240,57 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       }
       rest = rest.replace(/^\{(.*)\}$/, "$1").trim();
       const attrs: string[] = rest ? [rest] : [];
+      const titleForFence = pendingTitle !== undefined && !/\btitle\s*=/.test(rest) ? pendingTitle : undefined;
       if (pendingTitle !== undefined && !/\btitle\s*=/.test(rest)) attrs.push(`title=${attrValue(pendingTitle)}`);
       if (highlight.length > 0) attrs.push(`highlight="${compressRanges(highlight)}"`);
       pendingTitle = undefined;
+      const isShell = TERMINAL_COMMAND_LANGS.has(lang.toLowerCase());
+      const isOutput = TERMINAL_OUTPUT_LANGS.has(lang.toLowerCase());
+      if (isShell || isOutput) {
+        // 端末ボックス: コマンド（"$ " 付き）と、続く出力フェンスを1つの console にまとめる。
+        const termLines: string[] = isShell ? code.map((l) => (l.trim() === "" || /^\s*\$ /.test(l) ? l : `$ ${l}`)) : [...code];
+        const termHighlight = [...highlight];
+        let end = j + 1;
+        if (isShell) {
+          let k = j + 1;
+          while (k < lines.length && lines[k]!.trim() === "") k++;
+          const nm = k < lines.length ? FENCE_OPEN.exec(lines[k]!) : null;
+          if (nm && !(nm[2]![0] === "`" && nm[3]!.includes("`"))) {
+            const nInfo = nm[3]!.trim();
+            const nLang = (nInfo.split(/\s/)[0] ?? "").toLowerCase();
+            if (TERMINAL_OUTPUT_LANGS.has(nLang)) {
+              const nCloser = new RegExp(`^\\s*${nm[2]![0] === "`" ? "`" : "~"}{${nm[2]!.length},}\\s*$`);
+              let m = k + 1;
+              while (m < lines.length && !nCloser.test(lines[m]!)) m++;
+              if (m >= lines.length) warn(ctx, "閉じていないコードブロックがありました");
+              const out2 = readBody(k + 1, m, nm[1]!.length);
+              const base = termLines.length;
+              termLines.push(...out2.code);
+              termHighlight.push(...out2.highlight.map((n) => n + base));
+              end = m + 1;
+            }
+          }
+        }
+        // title は callout の label へ移す。それ以外の属性は console フェンスに残す。
+        let label: string | undefined;
+        const keep: string[] = [];
+        if (rest) {
+          const tm = /\btitle\s*=\s*("[^"]*"|'[^']*'|\S+)/.exec(rest);
+          if (tm) {
+            label = tm[1]!;
+            const remain = (rest.slice(0, tm.index) + rest.slice(tm.index + tm[0].length)).trim();
+            if (remain) keep.push(remain);
+          } else keep.push(rest);
+        }
+        if (label === undefined && titleForFence !== undefined) label = attrValue(titleForFence);
+        if (termHighlight.length > 0) keep.push(`highlight="${compressRanges(termHighlight)}"`);
+        blank();
+        out.push(`:::callout{type="terminal"${label !== undefined ? ` label=${label}` : ""}}`, "");
+        out.push(`${marker}${keep.length > 0 ? `console {${keep.join(" ")}}` : "console"}`, ...termLines, marker, "", ":::");
+        blank();
+        i = end;
+        continue;
+      }
       const head = attrs.length > 0 ? `${lang || "text"} {${attrs.join(" ")}}` : lang;
       blank();
       out.push(`${marker}${head}`, ...code, marker);
