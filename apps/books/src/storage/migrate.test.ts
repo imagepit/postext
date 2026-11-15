@@ -27,6 +27,9 @@ describe("outlineAttachmentIdOf", () => {
     expect(outlineAttachmentIdOf("resources/fig.png")).toBeUndefined();
     expect(outlineAttachmentIdOf("outline/not-a-uuid.png")).toBeUndefined();
     expect(outlineAttachmentIdOf(`x/outline/${ATT}.png`)).toBeUndefined();
+    expect(outlineAttachmentIdOf(`resources/outline-img-${ATT}.png`)).toBe(ATT);
+    expect(outlineAttachmentIdOf(`resources/outline-img-${ATT}-2.svg`)).toBe(ATT);
+    expect(outlineAttachmentIdOf(`resources/outline-img-not-a-uuid.png`)).toBeUndefined();
   });
 });
 

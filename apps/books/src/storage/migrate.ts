@@ -18,9 +18,21 @@ import type { BlobRef, BlobStore } from "./blobStore";
 import { knownRefs, resolveAssetRefs } from "./refs";
 import type { KnownRefs } from "./refs";
 
-/** `outline/<attachmentId>.<ext>` の添付 ID。Outline から取り込んだ画像のパス。 */
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+// 取り込み直後は `outline/<id>.<ext>`。編集画面で保存し直すと Sandbox がリソースIDの名前に付け替え、
+// `resources/outline-img-<id>[-n].<ext>` になる。どちらも同じ Outline の添付を指す。
+const OUTLINE_PATHS = [
+  new RegExp(`^outline/(${UUID})\\.[A-Za-z0-9]+$`, "i"),
+  new RegExp(`^resources/outline-img-(${UUID})(?:-\\d+)?\\.[A-Za-z0-9]+$`, "i"),
+];
+
+/** Outline から取り込んだ画像のパスにある添付 ID。中身が原本と同じかは、呼び出し側が sha256 で確かめる。 */
 export function outlineAttachmentIdOf(path: string): string | undefined {
-  return /^outline\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.[A-Za-z0-9]+$/i.exec(path)?.[1];
+  for (const re of OUTLINE_PATHS) {
+    const id = re.exec(path)?.[1];
+    if (id) return id;
+  }
+  return undefined;
 }
 
 export interface OutlineObject {
