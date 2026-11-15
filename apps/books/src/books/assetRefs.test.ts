@@ -71,8 +71,8 @@ describe("書籍の資産は R2 の参照になる", () => {
   it("保存した資産は DB に bytes を持たず、postext 参照で、読むと同じバイト列が返る", async () => {
     const book = await repo.create(draft({ assets: [asset("outline/a.png", png)] }));
     const [row] = await db.select().from(schema.assets).where(eq(schema.assets.bookId, book.id));
+    expect(row).not.toHaveProperty("bytes");
     expect(row).toMatchObject({
-      bytes: null,
       storage: "postext",
       objectKey: `sha256/${sha256Of(png)}`,
       size: png.length,
@@ -86,7 +86,8 @@ describe("書籍の資産は R2 の参照になる", () => {
   it("Outline の鍵つきの資産は outline 参照になり、バイト列は postext へ書かない", async () => {
     const book = await repo.create(draft({ assets: [asset("outline/a.png", png, { outlineKey: "uploads/u/a/a.png" })] }));
     const [row] = await db.select().from(schema.assets).where(eq(schema.assets.bookId, book.id));
-    expect(row).toMatchObject({ storage: "outline", objectKey: "uploads/u/a/a.png", bytes: null });
+    expect(row).not.toHaveProperty("bytes");
+    expect(row).toMatchObject({ storage: "outline", objectKey: "uploads/u/a/a.png" });
     await expect(store.putPostext(png, "image/png")).resolves.toBeTruthy();
     // outline 側のオブジェクトを用意すれば読める。
     await store.putOutline("uploads/u/a/a.png", png);

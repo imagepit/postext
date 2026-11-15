@@ -33,25 +33,17 @@ const versionColumns = {
 };
 
 const refOfRow = (row: {
-  storage: "outline" | "postext" | null;
-  objectKey: string | null;
+  storage: "outline" | "postext";
+  objectKey: string;
   sha256: string;
   size: number;
   mime: string;
-}): BlobRef | undefined =>
-  row.storage && row.objectKey
-    ? { storage: row.storage, key: row.objectKey, sha256: row.sha256, size: row.size, mime: row.mime }
-    : undefined;
+}): BlobRef => ({ storage: row.storage, key: row.objectKey, sha256: row.sha256, size: row.size, mime: row.mime });
 
 /** 書籍がすでに持つ参照。保存する資産が同じ内容なら、これを使い回す。 */
 async function readKnownRefs(db: Db | Tx, bookId: string): Promise<KnownRefs> {
   const rows = await db.select().from(assets).where(eq(assets.bookId, bookId));
-  return knownRefs(
-    rows.flatMap((r) => {
-      const ref = refOfRow(r);
-      return ref ? [{ path: r.path, ref }] : [];
-    }),
-  );
+  return knownRefs(rows.map((r) => ({ path: r.path, ref: refOfRow(r) })));
 }
 
 const BYTE_FETCH_CONCURRENCY = 4;
@@ -87,7 +79,6 @@ async function insertChildren(
           kind: a.kind,
           path: a.path,
           mime: a.mime,
-          bytes: null,
           sha256: ref.sha256,
           storage: ref.storage,
           objectKey: ref.key,
@@ -250,8 +241,7 @@ export function createPgRepository(db: Db, store?: BlobStore): BookRepository {
       // スナップショットを閉じてから、R2（とディスクキャッシュ）からバイト列を読む。
       const data: AssetData[] = await mapLimit(loaded.rows, BYTE_FETCH_CONCURRENCY, async (a) => {
         const ref = refOfRow(a);
-        const bytes = ref ? Buffer.from(await blobs().get(ref)) : a.bytes;
-        if (!bytes) throw new Error(`資産 ${a.path} にバイト列も参照もありません`);
+        const bytes = Buffer.from(await blobs().get(ref));
         return {
           kind: a.kind,
           path: a.path,
@@ -259,7 +249,7 @@ export function createPgRepository(db: Db, store?: BlobStore): BookRepository {
           sha256: a.sha256,
           size: bytes.length,
           bytes,
-          ...(ref ? { ref } : {}),
+          ref,
         };
       });
       return { id: loaded.row.id, revision: loaded.row.revision, ...loaded.content, assets: data };
