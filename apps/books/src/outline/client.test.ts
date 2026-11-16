@@ -58,6 +58,68 @@ describe("outline client", () => {
       { url: "https://files.example/signed?x=1", auth: undefined },
     ]);
   });
+
+  it("文書の本文を documents.update で置き換える", async () => {
+    let sent: unknown;
+    const fetchFn: FetchFn = async (url, init) => {
+      expect(url).toBe("https://outline.example/api/documents.update");
+      sent = JSON.parse(String(init?.body));
+      return json({ id: "d", title: "題", text: "新しい本文", updatedAt: "2026-11-16T00:00:00Z" });
+    };
+    const doc = await createOutlineClient(config, fetchFn).updateDocument("d", "新しい本文");
+    expect(sent).toEqual({ id: "d", text: "新しい本文" });
+    expect(doc).toMatchObject({ id: "d", text: "新しい本文", updatedAt: "2026-11-16T00:00:00Z" });
+  });
+
+  it("添付は PUT の署名付き URL へ認証なしで送り、添付 ID と参照を返す", async () => {
+    const seen: { url: string; method?: string; auth?: string; body?: unknown }[] = [];
+    const fetchFn: FetchFn = async (url, init) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      seen.push({ url, method: init?.method, auth: headers.Authorization });
+      if (url.endsWith("/attachments.create")) {
+        expect(JSON.parse(String(init?.body))).toEqual({ documentId: "d", name: "fig.png", contentType: "image/png", size: 3, preset: "documentAttachment" });
+        return json({ mode: "put", url: "https://r2.example/b/k?sig=1", headers: { "Content-Type": "image/png" }, attachment: { id: "att-1", url: "/api/attachments.redirect?id=att-1" } });
+      }
+      expect(headers["Content-Type"]).toBe("image/png");
+      return new Response(null, { status: 200 });
+    };
+    const created = await createOutlineClient(config, fetchFn).createAttachment({ documentId: "d", name: "fig.png", contentType: "image/png", bytes: new Uint8Array([1, 2, 3]) });
+    expect(created).toEqual({ id: "att-1", url: "/api/attachments.redirect?id=att-1" });
+    expect(seen.map(({ url, method, auth }) => ({ url, method, auth }))).toEqual([
+      { url: "https://outline.example/api/attachments.create", method: "POST", auth: "Bearer tok" },
+      { url: "https://r2.example/b/k?sig=1", method: "PUT", auth: undefined },
+    ]);
+  });
+
+  it("POST の送り先が Outline 自身なら、フォームに file を足して認証つきで送る", async () => {
+    let form: FormData | undefined;
+    let auth: string | undefined;
+    const fetchFn: FetchFn = async (url, init) => {
+      if (url.endsWith("/attachments.create")) {
+        return json({ uploadUrl: "/api/files.create", form: { key: "uploads/k" }, attachment: { id: "att-2", url: "/api/attachments.redirect?id=att-2" } });
+      }
+      expect(url).toBe("https://outline.example/api/files.create");
+      auth = (init?.headers as Record<string, string>).Authorization;
+      form = init?.body as FormData;
+      return new Response(null, { status: 200 });
+    };
+    const created = await createOutlineClient(config, fetchFn).createAttachment({ documentId: "d", name: "a.svg", contentType: "image/svg+xml", bytes: new Uint8Array([60]) });
+    expect(created.id).toBe("att-2");
+    expect(auth).toBe("Bearer tok");
+    expect(form?.get("key")).toBe("uploads/k");
+    expect(form?.get("file")).toBeInstanceOf(Blob);
+  });
+
+  it("送り先が失敗したら OutlineHttpError", async () => {
+    const fetchFn: FetchFn = async (url) =>
+      url.endsWith("/attachments.create")
+        ? json({ mode: "put", url: "https://r2.example/x", attachment: { id: "a", url: "/u" } })
+        : new Response(null, { status: 403 });
+    const error = await createOutlineClient(config, fetchFn)
+      .createAttachment({ documentId: "d", name: "x.png", contentType: "image/png", bytes: new Uint8Array([1]) })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(OutlineHttpError);
+  });
 });
 
 describe("outlineObjectKeyFromUrl", () => {
