@@ -26,7 +26,7 @@ git diff --stat v1.82.0 imagepit-v1.82.0 -- packages
 
 ## 1. 本体への変更
 
-上流の既存ファイルを変えたのは、次の3件だけです。どれも、使わなければ上流と同じに動きます（既定は無効、または引数を渡したときだけ動く）。
+上流の既存ファイルを変えたのは、次の4件だけです。どれも、使わなければ上流と同じに動きます（既定は無効、または引数を渡したときだけ動く）。
 
 ### 1-1. Sandboxを外部の保存先につなぐ橋（HostBridge）
 
@@ -91,6 +91,22 @@ git diff --stat v1.82.0 imagepit-v1.82.0 -- packages
   - HTML・EPUB・Wordの書き出しには反映していない。
 - **確かめるテスト:** `codeAnnotations.test.ts` と `packages/postext/src/__tests__/pipeline/code` 全体。そのうえで、教材をCLIで組み、注釈の行を目で見る。
 
+### 1-4. プレビューの画像をクリックしたらリソース詳細を開く
+
+- **目的:** プレビュー上の画像をクリックしたら、その画像のリソース詳細（幅・揃え・キャプション）を開くため。上流の動きは、内容モードでは本文の `::resource` 行へ移るだけで、UUIDのIDを一覧から探さないと設定を開けなかった。
+- **計画とPR:** CORE-214
+- **変えたファイル:**
+
+  | ファイル | 変更 |
+  |---|---|
+  | `packages/postext-sandbox/src/viewport/canvas/CanvasPreview/interaction/targets.ts` | 内容モードの判定を `contentSelectionLeads` に切り出し、選ばれた最も内側の要素が画像（`resource`）ならページ選択の処理へ回す（リソースパネルが開く） |
+  | `packages/postext-sandbox/src/viewport/canvas/CanvasPreview/interaction/targets.test.ts` | 新規。上のテスト |
+
+- **上流の更新で気をつける点:**
+  - `selectionLeads` の内容モードの条件が上流で変わったら、`contentSelectionLeads` に移し、`el.level === 'resource'` を残す。
+  - 上流が画像のクリックを別の形でリソースパネルにつなぐようになったら、この変更を消す。
+- **確かめるテスト:** `targets.test.ts` と `src/selection`、`src/viewport/canvas`。そのうえで、編集画面で画像をクリックしてリソース詳細が開くことを見る。
+
 ## 2. 自社が足したファイル
 
 上流にないファイルなので、上流の更新で衝突しません。上流のビルドの仕組み（turbo・pnpm）が変わったときだけ見直します。
@@ -140,10 +156,11 @@ WebMCPのツール名と引数は上流が決めています。版を上げた�
 
 [IMAGEPIT.md](IMAGEPIT.md) の「上流の新しい版へ追従する」の手順に、次を足して確かめます。
 
-1. 1章の3件について、衝突を解いた後に該当のテストを通す。
+1. 1章の4件について、衝突を解いた後に該当のテストを通す。
    - `hostBridge.test.ts`
    - `designStore.test.ts`
    - `codeAnnotations.test.ts`
+   - `targets.test.ts`
 2. `apps/books` のテストを、開発用のPostgreSQLを起動して全件通す。
 
    ```bash

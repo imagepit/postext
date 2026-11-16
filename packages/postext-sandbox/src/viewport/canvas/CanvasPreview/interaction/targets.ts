@@ -17,6 +17,28 @@ import type { ComposedBook } from '../../../../book/types.js';
 import type { FrameTools } from '../../../composed/frameTools.js';
 import type { PageInteractionState } from './state.js';
 
+/**
+ * In Content mode, whether a click's page selection is carried out (the
+ * Design panel, the Resources panel…) rather than placing the caret in the
+ * Markdown. A level picked above the innermost one always is; at the
+ * innermost: a design element, a slot, an attribute, a label, and a figure's
+ * picture (IMAGEPIT CORE-214: a click on a picture opens its resource, so
+ * its width, alignment and caption are at hand). A caption's or a table
+ * cell's words still put the caret in their text.
+ */
+export function contentSelectionLeads(sel: PageSelection): boolean {
+  if (sel.level > 0) return true;
+  const el = sel.chain[0]!;
+  return (
+    el.level === 'design' ||
+    el.level === 'slot' ||
+    el.level === 'attr' ||
+    el.level === 'label' ||
+    el.level === 'resource' ||
+    (el.level === 'text' && el.source.kind === 'attr')
+  );
+}
+
 /** What createInteractionTargets takes from the page interaction. */
 export interface InteractionTargetsDeps {
   opts: PageInteractionOptions;
@@ -71,9 +93,7 @@ export function createInteractionTargets(deps: InteractionTargetsDeps) {
       const frame = frames?.frameAt(at.pageIndex, at.x, at.y);
       return !frame || sel.chain.some((e) => e.id === frame.id);
     }
-    if (sel.level > 0) return true;
-    const el = sel.chain[0]!;
-    return el.level === 'design' || el.level === 'slot' || el.level === 'attr' || el.level === 'label' || (el.level === 'text' && el.source.kind === 'attr');
+    return contentSelectionLeads(sel);
   };
 
   const resolveSheetPoint = (ev: MouseEvent): PagePointer | null => locate(ev);
