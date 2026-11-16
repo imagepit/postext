@@ -35,7 +35,7 @@ export interface ChildPlaceDeps {
   restyleContainer: (container: ParagraphContainer | undefined) => ParagraphContainer | undefined;
   innerTop: number;
   exclusions: BoxExclusion[];
-  highlights: { y: number; height: number }[];
+  highlights: { y: number; height: number; kind?: import('../../../types.js').CodeLineKind; highlight?: boolean }[];
   nestPath: readonly number[] | undefined;
   resourceGapPx: number;
   resourceGapBelow: boolean;
@@ -334,7 +334,10 @@ export function createChildPlace(deps: ChildPlaceDeps) {
     if (code) {
       blk.code = code;
       if (measuredBlock.direction) blk.direction = measuredBlock.direction;
-      for (const line of blk.lines) if (line.codeLine?.highlight) highlights.push({ y: line.bbox.y, height: line.bbox.height });
+      for (const line of blk.lines) {
+        const cl = line.codeLine;
+        if (cl?.highlight || cl?.kind) highlights.push({ y: line.bbox.y, height: line.bbox.height, ...(cl.kind ? { kind: cl.kind } : {}), ...(cl.highlight ? { highlight: true } : {}) });
+      }
     }
 
     if (listBullet && !openedMidRun) {

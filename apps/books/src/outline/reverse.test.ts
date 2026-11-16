@@ -94,12 +94,43 @@ describe("toOutlineMarkdown: 書き方ごと", () => {
     const r = back(
       [':::callout{type="terminal" label="確認"}', "", "```console {highlight=\"3\"}", "$ java -version", "$ ls", "openjdk 21", "```", "", ":::"].join("\n"),
     );
-    expect(r.markdown).toBe(["*確認*", "", "```bash", "java -version", "ls", "```", "", "```bash-output", "//addstart", "openjdk 21", "//addend", "```", ""].join("\n"));
+    expect(r.markdown).toBe(["*確認*", "", "```bash", "java -version", "ls", "```", "", "```bash-output", "//highlightstart", "openjdk 21", "//highlightend", "```", ""].join("\n"));
   });
 
-  it("コードの title と highlight を斜体の題と //addstart へ戻す", () => {
-    const r = back(['```java {title="Hello.java" highlight="2-3"}', "a", "b", "c", "```"].join("\n"));
-    expect(r.markdown).toBe(["*Hello.java*", "", "```java", "a", "//addstart", "b", "c", "//addend", "```", ""].join("\n"));
+  it("コードの title を斜体の題へ、行の種類6つをそれぞれのマーカーへ戻す", () => {
+    const r = back(['```java {title="Hello.java" add="2-3" del="1" highlight="4" focus="3" error="5" warning="6"}', "a", "b", "c", "d", "e", "f", "```"].join("\n"));
+    expect(r.markdown).toBe(
+      [
+        "*Hello.java*",
+        "",
+        "```java",
+        "//delstart",
+        "a",
+        "//delend",
+        "//addstart",
+        "b",
+        "//focusstart",
+        "c",
+        "//focusend",
+        "//addend",
+        "//highlightstart",
+        "d",
+        "//highlightend",
+        "//errorstart",
+        "e",
+        "//errorend",
+        "//warningstart",
+        "f",
+        "//warningend",
+        "```",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("端末の囲みの行の種類は、コマンドと実行結果のそれぞれへ戻す", () => {
+    const r = back([':::callout{type="terminal"}', "", '```console {add="1" error="3"}', "$ ls", "a", "b", "```", "", ":::"].join("\n"));
+    expect(r.markdown).toBe(["```bash", "//addstart", "ls", "//addend", "```", "", "```bash-output", "a", "//errorstart", "b", "//errorend", "```", ""].join("\n"));
   });
 
   it("画像は幅とキャプションつきの Outline の添付へ、Postext で足した画像は仮の参照にする", () => {

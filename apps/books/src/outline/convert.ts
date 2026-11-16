@@ -176,6 +176,37 @@ function parseTable(ctx: Ctx, rows: string[]): string {
   return id;
 }
 
+/** デザインシステムの行注釈の種類（契約 #6818）。Postext のフェンスの属性名と同じ。 */
+export const LINE_KINDS = ["add", "del", "highlight", "focus", "error", "warning"] as const;
+export type LineKind = (typeof LINE_KINDS)[number];
+type LineMarks = Map<LineKind, number[]>;
+
+const LEGACY_MARKERS: Record<string, { kind: LineKind; edge: "start" | "end" }> = {
+  "//▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼追加▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼": { kind: "add", edge: "start" },
+  "//▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲追加▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲": { kind: "add", edge: "end" },
+  "//▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼削除▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼": { kind: "del", edge: "start" },
+  "//▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲削除▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲": { kind: "del", edge: "end" },
+};
+
+/** 行注釈のマーカー行（`//addstart` など6種と、デザインシステムが読み替える古い書き方）なら、その種類と開閉。 */
+export function lineMarker(line: string): { kind: LineKind; edge: "start" | "end" } | null {
+  const t = line.trim();
+  if (t === "//highlight-start") return { kind: "highlight", edge: "start" };
+  if (t === "//highlight-end") return { kind: "highlight", edge: "end" };
+  const m = /^\/\/(add|del|highlight|focus|error|warning)(start|end)$/.exec(t);
+  if (m) return { kind: m[1] as LineKind, edge: m[2] as "start" | "end" };
+  for (const [legacy, mark] of Object.entries(LEGACY_MARKERS)) if (line.includes(legacy)) return mark;
+  return null;
+}
+
+/** 種類ごとの行番号を、フェンスの属性（`add="2" del="4-5"`）にする。 */
+function markAttrs(marks: LineMarks): string[] {
+  return LINE_KINDS.flatMap((kind) => {
+    const ns = marks.get(kind);
+    return ns && ns.length > 0 ? [`${kind}="${compressRanges(ns)}"`] : [];
+  });
+}
+
 function compressRanges(lines: number[]): string {
   const out: string[] = [];
   for (let i = 0; i < lines.length; ) {
@@ -213,24 +244,25 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       if (j >= lines.length) warn(ctx, "閉じていないコードブロックがありました");
       const readBody = (from: number, to: number, ind: number) => {
         const code: string[] = [];
-        const highlight: number[] = [];
-        let inAdd = false;
-        let deleted = false;
+        const marks: LineMarks = new Map();
+        const open = new Set<LineKind>();
         for (const raw of lines.slice(from, to)) {
           const body = raw.slice(Math.min(ind, leadingSpaces(raw)));
-          const t = body.trim();
-          if (t === "//addstart") inAdd = true;
-          else if (t === "//addend") inAdd = false;
-          else if (t === "//delstart" || t === "//delend") deleted = true;
-          else {
-            code.push(body);
-            if (inAdd) highlight.push(code.length);
+          const marker = lineMarker(body);
+          if (marker) {
+            if (marker.edge === "start") open.add(marker.kind);
+            else open.delete(marker.kind);
+            continue;
+          }
+          code.push(body);
+          for (const kind of open) {
+            if (!marks.has(kind)) marks.set(kind, []);
+            marks.get(kind)!.push(code.length);
           }
         }
-        if (deleted) warn(ctx, "//delstart〜//delend の範囲は削除表示にできないため、行を残してマーカーだけ取り除きました");
-        return { code, highlight };
+        return { code, marks };
       };
-      const { code, highlight } = readBody(i + 1, j, indent);
+      const { code, marks } = readBody(i + 1, j, indent);
       let lang = "";
       let rest = info;
       if (info && !info.startsWith("{")) {
@@ -242,14 +274,14 @@ function processLines(lines: string[], ctx: Ctx): string[] {
       const attrs: string[] = rest ? [rest] : [];
       const titleForFence = pendingTitle !== undefined && !/\btitle\s*=/.test(rest) ? pendingTitle : undefined;
       if (pendingTitle !== undefined && !/\btitle\s*=/.test(rest)) attrs.push(`title=${attrValue(pendingTitle)}`);
-      if (highlight.length > 0) attrs.push(`highlight="${compressRanges(highlight)}"`);
+      attrs.push(...markAttrs(marks));
       pendingTitle = undefined;
       const isShell = TERMINAL_COMMAND_LANGS.has(lang.toLowerCase());
       const isOutput = TERMINAL_OUTPUT_LANGS.has(lang.toLowerCase());
       if (isShell || isOutput) {
         // 端末ボックス: コマンド（"$ " 付き）と、続く出力フェンスを1つの console にまとめる。
         const termLines: string[] = isShell ? code.map((l) => (l.trim() === "" || /^\s*\$ /.test(l) ? l : `$ ${l}`)) : [...code];
-        const termHighlight = [...highlight];
+        const termMarks: LineMarks = new Map([...marks].map(([k, v]) => [k, [...v]]));
         let end = j + 1;
         if (isShell) {
           let k = j + 1;
@@ -266,7 +298,7 @@ function processLines(lines: string[], ctx: Ctx): string[] {
               const out2 = readBody(k + 1, m, nm[1]!.length);
               const base = termLines.length;
               termLines.push(...out2.code);
-              termHighlight.push(...out2.highlight.map((n) => n + base));
+              for (const [kind, ns] of out2.marks) termMarks.set(kind, [...(termMarks.get(kind) ?? []), ...ns.map((n) => n + base)]);
               end = m + 1;
             }
           }
@@ -283,7 +315,7 @@ function processLines(lines: string[], ctx: Ctx): string[] {
           } else keep.push(rest);
         }
         if (label === undefined && titleForFence !== undefined) label = attrValue(titleForFence);
-        if (termHighlight.length > 0) keep.push(`highlight="${compressRanges(termHighlight)}"`);
+        keep.push(...markAttrs(termMarks));
         blank();
         out.push(`:::callout{type="terminal"${label !== undefined ? ` label=${label}` : ""}}`, "");
         out.push(`${marker}${keep.length > 0 ? `console {${keep.join(" ")}}` : "console"}`, ...termLines, marker, "", ":::");

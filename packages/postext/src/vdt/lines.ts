@@ -357,7 +357,7 @@ export interface VDTLine {
    *  `clipped` a line cut at the box's edge. The segments carry final
    *  widths from the block's left edge (spaces are kept, never
    *  stretched). Absent on any other line. */
-  codeLine?: { line: number; number?: string; continued?: true; highlight?: true; wrapped?: true; clipped?: true };
+  codeLine?: { line: number; number?: string; continued?: true; highlight?: true; kind?: import('../types.js').CodeLineKind; wrapped?: true; clipped?: true };
   /** The first line of an entry of a back-of-book index (`:::index`): the
    *  entry's level (0 a main entry, 1 a sub-entry…). A block of the index
    *  may set more than one entry (the page-less entries heading its

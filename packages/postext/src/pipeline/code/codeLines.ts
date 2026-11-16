@@ -17,7 +17,7 @@
  */
 
 import type { ContentBlock } from '../../parse/index.js';
-import type { CodeTokenKind, ResolvedCodeStyleConfig } from '../../types.js';
+import type { CodeLineKind, CodeTokenKind, ResolvedCodeStyleConfig } from '../../types.js';
 import { createBoundingBox, flowRectToPage, pageIsVertical, type ResolvedConfig, type VDTBlock, type VDTDesignTextBlock, type VDTDocument, type VDTLine, type VDTLineSegment, type ContentWarning } from '../../vdt.js';
 import type { MeasuredBlock } from '../../measure/index.js';
 import { buildFontString } from '../../measure/index.js';
@@ -25,7 +25,7 @@ import { measureTextWidth } from '../../measure/canvas.js';
 import { graphemesOf } from '../../measure/graphemes.js';
 import { lineBaselineOffset } from '../../measure/vertical.js';
 import { dimensionToPx } from '../../units.js';
-import { resolvedCodeStyle } from '../../defaults/text/codeStyle.js';
+import { CODE_LINE_KINDS, resolvedCodeStyle } from '../../defaults/text/codeStyle.js';
 import { highlightCode, type CodeToken } from '../../code/highlight.js';
 
 /** What a fence asks of its listing, over `codeStyle`. */
@@ -35,6 +35,10 @@ export interface CodeFenceSettings {
   start: number;
   /** Source lines (1-based, as written) the fence highlights. */
   highlight: ReadonlySet<number>;
+  /** The kind of each line the fence marks (`add="2"`, `del="4-5"`…,
+   *  CORE-230), 1-based; a line marked twice takes the first kind of
+   *  {@link CODE_LINE_KINDS}. */
+  kinds: ReadonlyMap<number, CodeLineKind>;
 }
 
 /** A flag attribute: present and not `false` / `no` / `0`. */
@@ -68,7 +72,32 @@ export function codeFenceSettings(block: ContentBlock, cs: ResolvedCodeStyleConf
     lineNumbers: numbered ?? (start !== undefined ? true : cs.lineNumbers),
     start: start ?? 1,
     highlight: highlightLines(attrs.highlight),
+    kinds: lineKindsOf(attrs),
   };
+}
+
+/** The kinds a fence's `add` / `del` / `focus` / `error` / `warning`
+ *  attributes give its lines (CORE-230). */
+function lineKindsOf(attrs: Readonly<Record<string, string>>): Map<number, CodeLineKind> {
+  const out = new Map<number, CodeLineKind>();
+  for (const kind of CODE_LINE_KINDS) {
+    for (const n of highlightLines(attrs[kind])) if (!out.has(n)) out.set(n, kind);
+  }
+  return out;
+}
+
+/** The prefix column of a listing (CORE-230): when a line of a kind with
+ *  a `prefix` is in it, every line's text before its code, one width for
+ *  all (a blank where the line has none), so the columns line up. */
+export function codePrefixColumn(fence: CodeFenceSettings, cs: ResolvedCodeStyleConfig, count: number): string[] | undefined {
+  const prefixOf = (k: number): string | undefined => {
+    const kind = fence.kinds.get(k + 1);
+    return kind ? cs.lineKinds[kind]?.prefix : undefined;
+  };
+  let wide = 0;
+  for (let k = 0; k < count; k++) wide = Math.max(wide, [...(prefixOf(k) ?? '')].length);
+  if (wide === 0) return undefined;
+  return Array.from({ length: count }, (_, k) => `${(prefixOf(k) ?? '').padEnd(wide, ' ')} `);
 }
 
 /** What a piece of an annotated line is: `plain` text as written, the
@@ -208,7 +237,8 @@ export function measureCodeLines(input: CodeLinesInput): MeasuredCode {
   /** The runs of every line at one size. */
   const runsAt = (faces: Faces): Run[][] => info.lines.map((line, k) => {
     const raw: CodeToken[] = tokens?.[k] ?? (line.length > 0 ? [{ text: line }] : []);
-    const lineBold = cs.highlightBold && fence.highlight.has(k + 1);
+    const kind = fence.kinds.get(k + 1);
+    const lineBold = (cs.highlightBold && fence.highlight.has(k + 1)) || (kind !== undefined && cs.lineKinds[kind]?.bold === true);
     const pieces = cs.annotations ? annotatePieces(raw, line) : raw.map((p) => ({ ...p, role: 'plain' as AnnotationRole }));
     const runs: Run[] = [];
     let col = 0;
@@ -243,6 +273,9 @@ export function measureCodeLines(input: CodeLinesInput): MeasuredCode {
     return runs;
   });
   const widthOf = (runs: readonly Run[]): number => runs.reduce((s, r) => s + r.width, 0);
+  const prefixes = codePrefixColumn(fence, cs, info.lines.length);
+  /** The prefix column's width at one size (0 without one). */
+  const leadAt = (f: Faces): number => (prefixes ? Math.max(...prefixes.map((p) => measureTextWidth(p, f.normal))) : 0);
 
   /** The gutter of a numbered listing at one size: the widest number and
    *  the gap after it. */
@@ -256,18 +289,30 @@ export function measureCodeLines(input: CodeLinesInput): MeasuredCode {
   let faces = facesAt(cs, sizePx);
   let rows = runsAt(faces);
   let gutter = gutterAt(faces, sizePx);
+  let lead = leadAt(faces);
   const widest = Math.max(...rows.map(widthOf));
-  const tooWide = rows.filter((r) => gutter + widthOf(r) > input.measure + 0.01).length;
+  const tooWide = rows.filter((r) => gutter + lead + widthOf(r) > input.measure + 0.01).length;
   let scale = 1;
   if (tooWide > 0 && cs.overflow === 'shrink') {
-    const fit = Math.max(cs.minFontScale, Math.min(1, input.measure / (gutter + widest)));
+    const fit = Math.max(cs.minFontScale, Math.min(1, input.measure / (gutter + lead + widest)));
     scale = Math.floor(fit * 1000) / 1000;
     sizePx = input.fontSizePx * scale;
     faces = facesAt(cs, sizePx);
     rows = runsAt(faces);
     gutter = gutterAt(faces, sizePx);
+    lead = leadAt(faces);
   }
-  const measure = Math.max(1, input.measure - gutter);
+  const measure = Math.max(1, input.measure - gutter - lead);
+  /** The prefix before a line's first part, or a blank of its width before
+   *  a continuation: a leader, out of the copied text. */
+  const prefixSegment = (k: number, continued: boolean): VDTLineSegment[] => {
+    if (!prefixes) return [];
+    const text = prefixes[k]!;
+    if (continued || text.trim() === '') return [{ kind: 'text', text: '', width: lead, inserted: true }];
+    const kind = fence.kinds.get(k + 1);
+    const color = (kind ? cs.lineKinds[kind]?.prefixColor?.hex : undefined) ?? cs.color.hex;
+    return [{ kind: 'text', text, width: lead, inserted: true, leader: 'text', fontString: faces.normal, color }];
+  };
   // What still does not fit wraps (`wrap`, and `shrink` past its floor) or
   // is cut (`clip`).
   const cut = cs.overflow === 'clip';
@@ -333,12 +378,13 @@ export function measureCodeLines(input: CodeLinesInput): MeasuredCode {
     const flags = {
       ...(fence.lineNumbers ? { number: String(n) } : {}),
       ...(fence.highlight.has(k + 1) ? { highlight: true as const } : {}),
+      ...(fence.kinds.has(k + 1) ? { kind: fence.kinds.get(k + 1)! } : {}),
     };
     const lineLength = info.lines[k]!.length;
     const lineStart = plainAt;
     plainAt += lineLength + 1;
     if (widthOf(runs) <= measure + 0.01) {
-      push(runs.map((r) => segmentOf(r)), gutter, k, lineStart, lineStart + lineLength, flags);
+      push([...prefixSegment(k, false), ...runs.map((r) => segmentOf(r))], gutter, k, lineStart, lineStart + lineLength, flags);
       return;
     }
     // The line's characters, each with its run and advance.
@@ -376,7 +422,7 @@ export function measureCodeLines(input: CodeLinesInput): MeasuredCode {
       let b = 0;
       while (b < cells.length && w + cells[b]!.width <= measure + 0.01) w += cells[b++]!.width;
       const end = b < cells.length ? cells[b]!.at : lineStart + lineLength;
-      push(segmentsOf(0, b), gutter, k, lineStart, end, { ...flags, clipped: true });
+      push([...prefixSegment(k, false), ...segmentsOf(0, b)], gutter, k, lineStart, end, { ...flags, clipped: true });
       return;
     }
     // Turned over: break after the last space or punctuation that fits,
@@ -405,15 +451,15 @@ export function measureCodeLines(input: CodeLinesInput): MeasuredCode {
       const endAt = b < cells.length ? cells[b]!.at : lineStart + lineLength;
       const more = b < cells.length;
       if (first) {
-        push(segments, gutter, k, startAt, endAt, { ...flags, ...(more ? { wrapped: true as const } : {}) });
+        push([...prefixSegment(k, false), ...segments], gutter, k, startAt, endAt, { ...flags, ...(more ? { wrapped: true as const } : {}) });
       } else {
         // The marker in the hang, before the text: no character of it (a
         // leader: out of the copied text, an artifact in a tagged PDF).
-        const lead: VDTLineSegment[] = marker
+        const hangLead: VDTLineSegment[] = marker
           ? [{ kind: 'text', text: marker, width: hang, inserted: true, leader: 'text', fontString: faces.normal, color: cs.lineNumberColor.hex }]
           : [{ kind: 'text', text: '', width: hang, inserted: true }];
-        const { highlight } = flags;
-        push([...lead, ...segments], gutter, k, startAt, endAt, { continued: true, ...(highlight ? { highlight } : {}), ...(more ? { wrapped: true as const } : {}) });
+        const { highlight, kind } = flags;
+        push([...prefixSegment(k, true), ...hangLead, ...segments], gutter, k, startAt, endAt, { continued: true, ...(highlight ? { highlight } : {}), ...(kind ? { kind } : {}), ...(more ? { wrapped: true as const } : {}) });
       }
       first = false;
       a = b;

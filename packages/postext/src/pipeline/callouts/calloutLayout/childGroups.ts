@@ -95,6 +95,7 @@ export function createChildGroups(deps: ChildGroupsDeps) {
       ...(!closed && input.lineTo !== undefined ? { lineTo: input.lineTo } : {}),
       ...(reopened && reopened.openRest.length > 0 ? { openNested: reopened.openRest } : {}),
       mirrored: input.mirrored,
+      ...((input.style.backgroundEnabled ? input.style.background.hex : input.ground) ? { ground: (input.style.backgroundEnabled ? input.style.background.hex : input.ground)! } : {}),
       nestPath: [...(nestPath ?? []), open.containerId],
       ...(input.headingDesign ? { headingDesign: input.headingDesign } : {}),
       ...(input.boxDesign ? { boxDesign: input.boxDesign } : {}),
