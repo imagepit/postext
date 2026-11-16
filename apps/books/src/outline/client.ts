@@ -58,7 +58,28 @@ export interface OutlineClient {
   /** 親を省くと各コレクションの最上位の文書、指定すればその子。 */
   browse(parentId?: string): Promise<OutlineBrowseItem[]>;
   fetchAttachment(id: string): Promise<OutlineAttachment>;
+  /** 文書の本文を置き換える（documents.update）。更新後の文書を返す。 */
+  updateDocument(id: string, text: string): Promise<OutlineDocument>;
+  /** 文書に添付ファイルを足す（attachments.create の後、受け取った先へ送る）。本文から参照する添付 ID と URL を返す。 */
+  createAttachment(input: NewAttachment): Promise<CreatedAttachment>;
 }
+
+export interface NewAttachment {
+  documentId: string;
+  name: string;
+  contentType: string;
+  bytes: Uint8Array;
+}
+
+export interface CreatedAttachment {
+  id: string;
+  /** 本文に書く参照（/api/attachments.redirect?id=…）。 */
+  url: string;
+}
+
+type UploadTarget =
+  | { mode: "put"; url: string; headers?: Record<string, string>; attachment: { id: string; url: string } }
+  | { mode?: "post"; uploadUrl: string; form?: Record<string, string>; attachment: { id: string; url: string } };
 
 export interface OutlineConfig {
   baseUrl: string;
@@ -199,6 +220,37 @@ export function createOutlineClient(config: OutlineConfig, fetchFn: FetchFn = fe
         };
       }
       throw new Error("リダイレクトが多すぎます");
+    },
+
+    async updateDocument(id, text) {
+      return toDocument(await call<Record<string, unknown>>("documents.update", { id, text }));
+    },
+
+    async createAttachment({ documentId, name, contentType, bytes }) {
+      const target = await call<UploadTarget>("attachments.create", {
+        documentId,
+        name,
+        contentType,
+        size: bytes.length,
+        preset: "documentAttachment",
+      });
+      const body = new Blob([bytes as BlobPart], { type: contentType });
+      // 送り先は署名付き URL（R2）か、Outline 自身（ローカル保存）。認証は Outline 自身へだけ付ける。
+      const auth = (url: string): Record<string, string> =>
+        new URL(url).origin === origin ? { Authorization: `Bearer ${config.token}` } : {};
+      let response: Response;
+      if (target.mode === "put") {
+        const url = new URL(target.url, config.baseUrl).toString();
+        response = await fetchFn(url, { method: "PUT", headers: { ...(target.headers ?? {}), ...auth(url) }, body, cache: "no-store" });
+      } else {
+        const url = new URL(target.uploadUrl, config.baseUrl).toString();
+        const form = new FormData();
+        for (const [k, v] of Object.entries(target.form ?? {})) form.append(k, v);
+        form.append("file", body, name);
+        response = await fetchFn(url, { method: "POST", headers: auth(url), body: form, cache: "no-store" });
+      }
+      if (!response.ok) throw new OutlineHttpError(response.status, "attachments.upload");
+      return { id: target.attachment.id, url: target.attachment.url };
     },
   };
 }
