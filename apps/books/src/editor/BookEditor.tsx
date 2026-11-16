@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SandboxBookBridge, SandboxLabels } from "postext-sandbox";
 import { BooksSandbox } from "@/sandbox/BooksSandbox";
 import { OutlineImportDialog } from "./OutlineImportDialog";
+import { OutlinePushDialog } from "./OutlinePushDialog";
 import { initialState, statusText, transition } from "./saveState";
 import type { SaveEffect, SaveEvent, SaveState } from "./saveState";
 
@@ -32,6 +33,7 @@ export function BookEditor({ bookId, labels }: { bookId: string; labels: Sandbox
   const startedRef = useRef(false);
   const dispatchRef = useRef<(event: SaveEvent) => void>(() => undefined);
   const [importing, setImporting] = useState(false);
+  const [pushing, setPushing] = useState(false);
 
   const run = useCallback(
     (effect: SaveEffect) => {
@@ -99,8 +101,10 @@ export function BookEditor({ bookId, labels }: { bookId: string; labels: Sandbox
   dispatchRef.current = dispatch;
 
   // 取り込みはサーバー側で保存済みなので、保存状態を読み込み中に戻して最新版を取り直す。
+  // Outline への反映も、章の取り込み元の記録をサーバー側で書き換えるので同じく取り直す。
   const reloadAfterImport = useCallback(() => {
     setImporting(false);
+    setPushing(false);
     stateRef.current = { kind: "loading" };
     setState(stateRef.current);
     run({ type: "fetch" });
@@ -169,6 +173,14 @@ export function BookEditor({ bookId, labels }: { bookId: string; labels: Sandbox
         >
           Outlineから取り込む
         </button>
+        <button
+          type="button"
+          disabled={state.kind !== "saved"}
+          onClick={() => setPushing(true)}
+          className="rounded border border-rule px-2 py-0.5 text-foreground hover:bg-background disabled:opacity-40"
+        >
+          Outlineへ反映
+        </button>
         {state.kind === "conflict" && (
           <button
             type="button"
@@ -194,6 +206,7 @@ export function BookEditor({ bookId, labels }: { bookId: string; labels: Sandbox
       {importing && (
         <OutlineImportDialog bookId={bookId} onClose={() => setImporting(false)} onImported={reloadAfterImport} />
       )}
+      {pushing && <OutlinePushDialog bookId={bookId} onClose={() => setPushing(false)} onPushed={reloadAfterImport} />}
     </div>
   );
 }
