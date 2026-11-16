@@ -10,7 +10,7 @@
 
 import { resolveCodeStyleConfig } from '../../../defaults/text/codeStyle.js';
 import type { ContentBlock } from '../../../parse/types.js';
-import { codeFenceSettings } from '../../../pipeline/code/codeLines.js';
+import { codeFenceSettings, codePrefixColumn } from '../../../pipeline/code/codeLines.js';
 import { abs, blockId, type WriterContext } from '../context.js';
 import { FragmentBuilder } from '../fragments.js';
 import { generatedRuns } from '../generated.js';
@@ -40,7 +40,7 @@ export function renderCodeListing(ctx: WriterContext, b: ContentBlock): string |
   const cs = ctx.resolved.codeStyle ?? resolveCodeStyleConfig(undefined, ctx.resolved.bodyText);
   const set = codeFenceSettings(b, cs);
   const title = code.title?.trim();
-  if (!set.lineNumbers && !set.highlight.size && !title) return undefined;
+  if (!set.lineNumbers && !set.highlight.size && !set.kinds.size && !title) return undefined;
   const md = ctx.chapter.markdown;
   const last = set.start + code.lines.length - 1;
   const width = Math.max(String(set.start).length, String(last).length);
@@ -53,10 +53,17 @@ export function renderCodeListing(ctx: WriterContext, b: ContentBlock): string |
   // leaves room for a face a little wider.
   const codePx = px(ctx.units, cs.fontSize, px(ctx.units, ctx.resolved.bodyText.fontSize));
   const hang = set.lineNumbers ? twips(ctx.units, { value: width * 0.65, unit: 'em' }, codePx) + Math.max(twips(ctx.units, cs.lineNumberGap, codePx), twips(ctx.units, { value: 0.5, unit: 'em' }, codePx)) : 0;
+  // The prefix column (CORE-230): `+ ` / `- ` before a marked line, a blank
+  // of its width before the others, so the code keeps its columns.
+  const prefixes = codePrefixColumn(set, cs, code.lines.length);
   let out = title ? titleParagraph(ctx, b, title) : '';
   let offset = 0;
   code.lines.forEach((line, k) => {
-    const lead = set.lineNumbers ? generatedRuns(ctx, [{ text: `${String(set.start + k).padStart(width, ' ')}\t`, ...(numberColor ? { color: numberColor } : {}) }], 'code:number') : '';
+    const kind = set.kinds.get(k + 1);
+    const look = kind ? cs.lineKinds[kind] : undefined;
+    const prefixColor = look?.prefixColor ? hex(look.prefixColor) : undefined;
+    const lead = (set.lineNumbers ? generatedRuns(ctx, [{ text: `${String(set.start + k).padStart(width, ' ')}\t`, ...(numberColor ? { color: numberColor } : {}) }], 'code:number') : '')
+      + (prefixes ? generatedRuns(ctx, [{ text: prefixes[k]!, ...(prefixColor ? { color: prefixColor } : {}) }], 'code:prefix') : '');
     let words = '';
     if (line) {
       const sourceMap = b.sourceMap.slice(offset, offset + line.length).map((o) => abs(ctx, o));
@@ -65,12 +72,12 @@ export function renderCodeListing(ctx: WriterContext, b: ContentBlock): string |
       words = ctx.log.wrap(xml, frag, { block: blockId(ctx), target: { kind: 'markdown', chapter: ctx.chapter.index }, range: [start, start + line.length], role: `code${code.lang ? `:${code.lang}` : ''}` });
     }
     offset += line.length + 1;
-    const lit = set.highlight.has(k + 1) && tint;
+    const lit = (look?.background ? hex(look.background) : undefined) || (set.highlight.has(k + 1) && tint);
     const first = k === 0 && !title;
     const lastLine = k === code.lines.length - 1;
     // The lines sit solid, as in the listing: only the block's own space
     // before and after it.
-    out += paragraph({ style: STYLE.code, ...(first ? {} : { before: 0 }), ...(lastLine ? {} : { after: 0, keepNext: code.lines.length <= 12 }), ...(lit ? { shd: tint } : {}), ...(hang ? { ind: { left: hang, hanging: hang } } : {}) }, lead + words);
+    out += paragraph({ style: STYLE.code, ...(first ? {} : { before: 0 }), ...(lastLine ? {} : { after: 0, keepNext: code.lines.length <= 12 }), ...(lit ? { shd: lit } : {}), ...(hang ? { ind: { left: hang, hanging: hang } } : {}) }, lead + words);
   });
   return blockSdt(ctx.nextSdtId(), 'ptx:code', code.lang, out);
 }

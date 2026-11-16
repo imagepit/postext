@@ -1,7 +1,8 @@
 // Postext の章の Markdown を Outline の Markdown へ戻す。convert.ts の逆。入出力を持たない純粋関数。
-// 取り込みで落とした記述（先頭の yaml、差し込み記法）は、元の Outline 本文を渡せばそこから補う。
+// 取り込みで落とした記述（先頭の yaml、差し込み記法、画像の title）は、元の Outline 本文を渡せばそこから補う。
 // 往復の約束: convertOutlineMarkdown(toOutlineMarkdown(convert(X)).markdown) は convert(X) と同じ本文・画像・表になる。
 
+import { LINE_KINDS, type LineKind } from "./convert";
 import { bodyOf } from "./provenance";
 
 export interface ReverseOptions {
@@ -93,28 +94,41 @@ function expandRanges(spec: string): Set<number> {
   return set;
 }
 
+/** 種類ごとの行（1 始まり）。 */
+type KindLines = Map<LineKind, Set<number>>;
+
+/** フェンスの属性から、種類ごとの行を読む。 */
+function kindLines(attrs: [string, string][]): KindLines {
+  const out: KindLines = new Map();
+  for (const kind of LINE_KINDS) {
+    const spec = attr(attrs, kind);
+    if (spec !== undefined) out.set(kind, expandRanges(spec));
+  }
+  return out;
+}
+
+const NOT_MARKS = new Set<string>(["title", ...LINE_KINDS]);
+
 /**
- * ハイライト行を //addstart 〜 //addend で囲み、元の本文で削除表示だった行を //delstart 〜 //delend で囲む。
- * highlight の行番号は 1 始まりで、offset は code の先頭の行番号 - 1。
+ * 種類ごとの行を //addstart 〜 //addend などのマーカーで囲む（デザインシステムの行注釈、契約 #6818）。
+ * 行番号は 1 始まりで、offset は code の先頭の行番号 - 1。
  */
-function withMarkers(ctx: Ctx, code: string[], highlight: Set<number>, offset = 0): string[] {
-  const del = ctx.deletions.get(codeKey(code)) ?? new Set<number>();
+function withMarkers(code: string[], kinds: KindLines, offset = 0): string[] {
   const out: string[] = [];
-  let add = false;
-  let rm = false;
+  const open = new Set<LineKind>();
   code.forEach((line, k) => {
-    const onAdd = highlight.has(k + 1 + offset);
-    const onDel = del.has(k);
-    if (add && !onAdd) out.push("//addend");
-    if (rm && !onDel) out.push("//delend");
-    if (onDel && !rm) out.push("//delstart");
-    if (onAdd && !add) out.push("//addstart");
-    add = onAdd;
-    rm = onDel;
+    const on = new Set(LINE_KINDS.filter((kind) => kinds.get(kind)?.has(k + 1 + offset)));
+    for (const kind of [...LINE_KINDS].reverse()) if (open.has(kind) && !on.has(kind)) {
+      out.push(`//${kind}end`);
+      open.delete(kind);
+    }
+    for (const kind of LINE_KINDS) if (on.has(kind) && !open.has(kind)) {
+      out.push(`//${kind}start`);
+      open.add(kind);
+    }
     out.push(line);
   });
-  if (add) out.push("//addend");
-  if (rm) out.push("//delend");
+  for (const kind of [...LINE_KINDS].reverse()) if (open.has(kind)) out.push(`//${kind}end`);
   return out;
 }
 
@@ -124,43 +138,16 @@ interface Ctx {
   warnings: string[];
   /** 元の本文の画像の title（draw.io の "source=diagrams.net" など）。添付 ID ごと。 */
   imageTitles: Map<string, string>;
-  /** 元の本文のコードの削除表示（//delstart〜//delend）。マーカーを除いたコードの本文ごとに、削除行の位置（0 始まり）。 */
-  deletions: Map<string, Set<number>>;
 }
 
-const codeKey = (code: string[]): string => code.map((l) => l.replace(/^(\s*)\$ /, "$1").trimEnd()).join("\n");
-
-/** 元の本文から、取り込みで落ちる画像の title とコードの削除表示を集める。 */
-function readOriginal(original: string | undefined): Pick<Ctx, "imageTitles" | "deletions"> {
+/** 元の本文から、取り込みで落ちる画像の title を集める。 */
+function readOriginal(original: string | undefined): Pick<Ctx, "imageTitles"> {
   const imageTitles = new Map<string, string>();
-  const deletions = new Map<string, Set<number>>();
-  if (original === undefined) return { imageTitles, deletions };
+  if (original === undefined) return { imageTitles };
   for (const m of original.matchAll(/!\[[^\]]*\]\([^)\s]*\/api\/attachments\.redirect\?id=([^)\s&"]+)\s+("[^"]*")\)/g)) {
     imageTitles.set(m[1]!, m[2]!);
   }
-  const lines = original.replace(/\r\n?/g, "\n").split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const f = isFence(lines[i]!);
-    if (!f) continue;
-    const end = fenceEnd(lines, i, f);
-    const ind = f[1]!.length;
-    const code: string[] = [];
-    const del = new Set<number>();
-    let inDel = false;
-    for (const raw of lines.slice(i + 1, end)) {
-      const body = raw.slice(Math.min(ind, /^ */.exec(raw)![0].length));
-      const t = body.trim();
-      if (t === "//delstart") inDel = true;
-      else if (t === "//delend") inDel = false;
-      else if (t !== "//addstart" && t !== "//addend") {
-        if (inDel) del.add(code.length);
-        code.push(body);
-      }
-    }
-    if (del.size > 0) deletions.set(codeKey(code), del);
-    i = end;
-  }
-  return { imageTitles, deletions };
+  return { imageTitles };
 }
 
 const warn = (ctx: Ctx, message: string): void => {
@@ -239,12 +226,12 @@ const attrsText = (attrs: [string, string][]): string =>
 function codeBlock(ctx: Ctx, indent: string, marker: string, info: string, code: string[]): string[] {
   const { lang, attrs } = splitInfo(info);
   const title = attr(attrs, "title");
-  const highlight = expandRanges(attr(attrs, "highlight") ?? "");
-  const keep = attrs.filter(([k]) => k !== "title" && k !== "highlight");
+  const kinds = kindLines(attrs);
+  const keep = attrs.filter(([k]) => !NOT_MARKS.has(k));
   const head = keep.length > 0 ? `${lang} {${attrsText(keep)}}` : lang;
   const out: string[] = [];
   if (title !== undefined) out.push(`*${plain(title)}*`, "");
-  out.push(`${marker}${head}`, ...withMarkers(ctx, code, highlight), marker);
+  out.push(`${marker}${head}`, ...withMarkers(code, kinds), marker);
   return out.map((l) => (indent && l ? indent + l : l));
 }
 
@@ -261,8 +248,8 @@ function terminalLines(ctx: Ctx, label: string | undefined, inner: string[]): st
   const ind = f[1]!.length;
   const code = inner.slice(i + 1, end).map((l) => l.slice(Math.min(ind, /^ */.exec(l)![0].length)));
   const { attrs } = splitInfo(f[3]!);
-  const highlight = expandRanges(attr(attrs, "highlight") ?? "");
-  const keep = attrs.filter(([k]) => k !== "highlight" && k !== "title");
+  const kinds = kindLines(attrs);
+  const keep = attrs.filter(([k]) => !NOT_MARKS.has(k));
   let split = code.findIndex((l) => l.trim() !== "" && !/^\s*\$ /.test(l));
   if (split < 0) split = code.length;
   if (code.slice(split).some((l) => /^\s*\$ /.test(l))) warn(ctx, "端末の囲みで、実行結果の後ろにあるコマンドは実行結果として戻しました");
@@ -273,10 +260,10 @@ function terminalLines(ctx: Ctx, label: string | undefined, inner: string[]): st
   const out: string[] = [];
   if (label !== undefined) out.push(`*${plain(label)}*`, "");
   const head = (lang: string) => (keep.length > 0 ? `${lang} {${attrsText(keep)}}` : lang);
-  if (commands.length > 0) out.push(`${marker}${head("bash")}`, ...withMarkers(ctx, commands, highlight), marker);
+  if (commands.length > 0) out.push(`${marker}${head("bash")}`, ...withMarkers(commands, kinds), marker);
   if (output.length > 0) {
     if (commands.length > 0) out.push("");
-    out.push(`${marker}${commands.length > 0 ? "bash-output" : head("bash-output")}`, ...withMarkers(ctx, output, highlight, split), marker);
+    out.push(`${marker}${commands.length > 0 ? "bash-output" : head("bash-output")}`, ...withMarkers(output, kinds, split), marker);
   }
   return out;
 }

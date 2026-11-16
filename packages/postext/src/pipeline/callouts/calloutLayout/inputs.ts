@@ -75,6 +75,9 @@ export interface CalloutLayoutInput {
    *  document's, its `'start'` / `'end'` stripe, corner and label tab
    *  turn to the other side (#371). */
   direction?: 'ltr' | 'rtl';
+  /** The colour this box sits on: its nearest enclosing box's background
+   *  (CORE-230: a listing in a dark terminal box). Absent: the page. */
+  ground?: string;
   /** Nested boxes a continuation fragment opens inside, outermost first:
    *  their opening markers are not among `children`, which start inside
    *  the innermost one. Each is redrawn as a continuation box around the

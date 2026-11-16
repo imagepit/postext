@@ -70,13 +70,13 @@ describe("git-basics の変換", () => {
 
   it("6. フェンス直前の *題* は title になり、題の行は消える", () => {
     expect(lines).toContain(':::callout{type="terminal" label="コマンド実行"}');
-    expect(lines).toContain('```html {title="index.html（25行目あたり）" highlight="3"}');
+    expect(lines).toContain('```html {title="index.html（25行目あたり）" add="3" del="2"}');
     expect(result.markdown).not.toContain("*コマンド実行*");
     // 題のないフェンスはそのまま
     expect(lines).toContain("```");
   });
 
-  it("7. //addstart〜//addend は highlight、//delstart/delend は行を残して警告", () => {
+  it("7. //addstart〜//addend は add、//delstart〜//delend は行を残して del（CORE-230）", () => {
     const start = lines.findIndex((l) => l.startsWith("```html"));
     const end = lines.indexOf("```", start + 1);
     expect(lines.slice(start + 1, end)).toEqual([
@@ -87,7 +87,32 @@ describe("git-basics の変換", () => {
       "  </div>",
     ]);
     expect(result.markdown).not.toMatch(/\/\/(add|del)(start|end)/);
-    expect(result.warnings.some((w) => w.includes("//delstart"))).toBe(true);
+    expect(result.warnings.some((w) => w.includes("//delstart"))).toBe(false);
+  });
+
+  it("行注釈6種と古い書き方を、それぞれの属性にする（CORE-230）", () => {
+    const kinds = ["add", "del", "highlight", "focus", "error", "warning"];
+    for (const k of kinds) {
+      expect(convert(["```java", "a", `//${k}start`, "b", `//${k}end`, "c", "```"].join("\n")).markdown).toBe(`\`\`\`java {${k}="2"}\na\nb\nc\n\`\`\`\n`);
+    }
+    const legacy = convert(
+      [
+        "```java",
+        "  //highlight-start",
+        "a",
+        "  //highlight-end",
+        "//▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼追加▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼",
+        "b",
+        "//▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲追加▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲",
+        "x //▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼削除▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼",
+        "c",
+        "//▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲削除▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲",
+        "```",
+      ].join("\n"),
+    );
+    expect(legacy.markdown).toBe('```java {add="2" del="3" highlight="1"}\na\nb\nc\n```\n');
+    const nested = convert(["```js", "//addstart", "a", "//focusstart", "b", "//focusend", "//addend", "```"].join("\n"));
+    expect(nested.markdown).toBe('```js {add="1-2" focus="2"}\na\nb\n```\n');
   });
 
   it("8. 続きを持つ番号付き項目は1項目ずつの番号付きリストになり、続きは項目の外へ出る", () => {
@@ -209,7 +234,7 @@ describe("個別の規則", () => {
 
   it("言語のないフェンスに題や highlight が付くときは text を補う", () => {
     const r = convert("*題*\n\n```\na\n//addstart\nb\nc\n//addend\n```\n");
-    expect(r.markdown).toBe('```text {title="題" highlight="2-3"}\na\nb\nc\n```\n');
+    expect(r.markdown).toBe('```text {title="題" add="2-3"}\na\nb\nc\n```\n');
   });
 
   it("*強調* の行はフェンスが続かなければ段落のまま", () => {
@@ -277,14 +302,14 @@ describe("端末ボックス（bash / bash-output）", () => {
 
   it("題は label になり、highlight など他の属性は console に残る", () => {
     const r = convert("*確認*\n\n```bash\na\n//addstart\nb\n//addend\n```\n");
-    expect(r.markdown).toBe(':::callout{type="terminal" label="確認"}\n\n```console {highlight="2"}\n$ a\n$ b\n```\n\n:::\n');
+    expect(r.markdown).toBe(':::callout{type="terminal" label="確認"}\n\n```console {add="2"}\n$ a\n$ b\n```\n\n:::\n');
     const r2 = convert('```sh {title="T" x=1}\na\n```\n');
     expect(r2.markdown).toBe(':::callout{type="terminal" label="T"}\n\n```console {x=1}\n$ a\n```\n\n:::\n');
   });
 
   it("bash-stdout も出力として扱い、出力側の highlight は行番号をずらす", () => {
-    const r = convert("```zsh\nls\n```\n```bash-stdout\na\n//addstart\nb\n//addend\n```\n");
-    expect(r.markdown).toBe(':::callout{type="terminal"}\n\n```console {highlight="3"}\n$ ls\na\nb\n```\n\n:::\n');
+    const r = convert("```zsh\n//addstart\nls\n//addend\n```\n```bash-stdout\na\n//errorstart\nb\n//errorend\n```\n");
+    expect(r.markdown).toBe(':::callout{type="terminal"}\n\n```console {add="1" error="3"}\n$ ls\na\nb\n```\n\n:::\n');
   });
 
   it("bash-output だけ: 接頭辞なしの端末ボックス", () => {

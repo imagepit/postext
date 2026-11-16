@@ -107,6 +107,31 @@ git diff --stat v1.82.0 imagepit-v1.82.0 -- packages
   - 上流が画像のクリックを別の形でリソースパネルにつなぐようになったら、この変更を消す。
 - **確かめるテスト:** `targets.test.ts` と `src/selection`、`src/viewport/canvas`。そのうえで、編集画面で画像をクリックしてリソース詳細が開くことを見る。
 
+### 1-5. コードの行の種類（追加・削除・注目・エラー・警告）と行頭の記号（codeStyle.lineKinds）
+
+- **目的:** デザインシステムの行注釈6種（`//addstart` など、契約 #6818）を組版で見分けるため。上流の行の強調は `highlight` の1種類（1色の帯）しかない。追加・削除の行頭に「+」「-」を付け、記号のない行には同じ幅の空白を入れて、桁とインデントをそろえる。
+- **計画とPR:** CORE-230
+- **変えたファイル:**
+
+  | ファイル | 変更 |
+  |---|---|
+  | `packages/postext/src/types/text/code.ts` | `CodeLineKind`、`CodeLineKindStyle`（background・marker・bold・prefix・prefixColor）、`codeStyle.lineKinds` を追加 |
+  | `packages/postext/src/defaults/text/codeStyle.ts` | `CODE_LINE_KINDS`（重なったときの優先順）、`lineKinds` の解決と、既定値の除去 |
+  | `packages/postext/src/checks/configWarnings/unknownKeys.ts` | `lineKinds` とその中のキーを、知っているキーに追加 |
+  | `packages/postext/src/pipeline/code/codeLines.ts` | フェンスの属性 `add`・`del`・`focus`・`error`・`warning` を読む（`kinds`）。種類の太字。行頭の記号の欄（`codePrefixColumn`）を、コピーされない leader として各行の先頭に置き、その幅だけ測りを狭める |
+  | `packages/postext/src/vdt/lines.ts` | `codeLine.kind` を追加 |
+  | `packages/postext/src/pipeline/callouts/calloutLayout/childPlace.ts` | 帯を集めるとき、種類と強調の有無も渡す |
+  | `packages/postext/src/pipeline/callouts/calloutLayout/boxDecoration.ts` | 種類ごとの帯と左端の線（1.5pt）を塗る。黒地（箱の背景、または外側の箱の背景が暗い）では、明るい帯を塗らず線と記号だけにする |
+  | `packages/postext/src/pipeline/callouts/calloutLayout/inputs.ts`・`childGroups.ts`・`layoutCallout.ts` | 入れ子の箱へ、外側の箱の背景色（`ground`）を渡す。帯の型の変更 |
+  | `packages/postext/src/word/semantic/media/code.ts` | Word の出力でも、種類の背景と行頭の記号を付ける |
+  | `packages/postext/src/__tests__/pipeline/code/codeLineKinds.test.ts` | 新規。上のテスト |
+
+- **上流の更新で気をつける点:**
+  - 上流のコードの組版（`codeLines.ts` の `runsAt`・`push`・折り返し）が変わったら、記号の欄（`prefixSegment` と `lead`）の差し込み位置を合わせ直す。
+  - 上流が行の種類や差分表示を入れたら、そちらに寄せて、この変更を消す。取り込み（`apps/books/src/outline/convert.ts`）の属性名も合わせる。
+  - 既定では `lineKinds` が空で、上流の表示は変わらない。
+- **確かめるテスト:** `codeLineKinds.test.ts` と `src/__tests__/pipeline/code`・`callouts`。そのうえで、6種を使った見本をCLIでPDFに組み、帯・線・記号・桁の揃いを見る。
+
 ## 2. 自社が足したファイル
 
 上流にないファイルなので、上流の更新で衝突しません。上流のビルドの仕組み（turbo・pnpm）が変わったときだけ見直します。

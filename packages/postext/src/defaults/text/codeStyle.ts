@@ -1,4 +1,5 @@
 import type {
+  CodeLineKind,
   CodeOverflow,
   CodeStyleConfig,
   CodeTokenKind,
@@ -14,7 +15,7 @@ import { colorsEqual, dimensionsEqual } from '../shared.js';
 /** Code listings (#624): a monospaced face a little smaller than the
  *  text on the text's leading, in a pale box padded by 0.6 em, split
  *  between lines across columns and pages, long lines turned over. */
-export const DEFAULT_CODE_STYLE: Omit<ResolvedCodeStyleConfig, 'color' | 'tokens' | 'continuesMarker' | 'lineHeight' | 'titleStyle' | 'label' | 'inline'> = {
+export const DEFAULT_CODE_STYLE: Omit<ResolvedCodeStyleConfig, 'color' | 'tokens' | 'continuesMarker' | 'lineHeight' | 'titleStyle' | 'label' | 'inline' | 'lineKinds'> = {
   blocks: true,
   indentedCode: false,
   fontFamily: 'Source Code Pro',
@@ -55,6 +56,27 @@ export const DEFAULT_CODE_STYLE: Omit<ResolvedCodeStyleConfig, 'color' | 'tokens
   continuesMarkerEnabled: false,
   highlight: 'builtin',
 };
+
+/** The kinds of line a fence marks (CORE-230), in the order a line
+ *  marked twice takes its look from. */
+export const CODE_LINE_KINDS: readonly CodeLineKind[] = ['del', 'error', 'warning', 'add', 'focus'];
+
+function resolveLineKinds(own: CodeStyleConfig['lineKinds']): ResolvedCodeStyleConfig['lineKinds'] {
+  const out: ResolvedCodeStyleConfig['lineKinds'] = {};
+  if (!own || typeof own !== 'object') return out;
+  for (const kind of CODE_LINE_KINDS) {
+    const k = own[kind];
+    if (!k || typeof k !== 'object') continue;
+    out[kind] = {
+      ...(k.background ? { background: k.background } : {}),
+      ...(k.marker ? { marker: k.marker } : {}),
+      bold: k.bold === true,
+      ...(typeof k.prefix === 'string' && k.prefix !== '' ? { prefix: k.prefix } : {}),
+      ...(k.prefixColor ? { prefixColor: k.prefixColor } : {}),
+    };
+  }
+  return out;
+}
 
 export const CODE_TOKEN_KINDS: readonly CodeTokenKind[] = [
   'keyword', 'string', 'number', 'comment', 'function', 'type', 'operator',
@@ -163,6 +185,7 @@ export function resolveCodeStyleConfig(partial: CodeStyleConfig | undefined, bod
     highlightBackground: p.highlightBackground ?? D.highlightBackground,
     annotations: p.annotations === true,
     highlightBold: p.highlightBold === true,
+    lineKinds: resolveLineKinds(p.lineKinds),
     keepTogether: p.keepTogether === true,
     splitMinLines: Math.floor(atLeast(p.splitMinLines, 1, D.splitMinLines)),
     repeatTitle: p.repeatTitle === true,
@@ -238,6 +261,14 @@ export function stripCodeStyleDefaults(codeStyle?: CodeStyleConfig): CodeStyleCo
   if (col(codeStyle.highlightBackground, D.highlightBackground)) out.highlightBackground = codeStyle.highlightBackground;
   if (codeStyle.annotations !== undefined && codeStyle.annotations !== D.annotations) out.annotations = codeStyle.annotations;
   if (codeStyle.highlightBold !== undefined && codeStyle.highlightBold !== D.highlightBold) out.highlightBold = codeStyle.highlightBold;
+  if (codeStyle.lineKinds) {
+    const kinds: NonNullable<CodeStyleConfig['lineKinds']> = {};
+    for (const kind of CODE_LINE_KINDS) {
+      const own = codeStyle.lineKinds[kind];
+      if (own && Object.keys(own).length > 0) kinds[kind] = own;
+    }
+    if (Object.keys(kinds).length > 0) out.lineKinds = kinds;
+  }
   if (codeStyle.keepTogether !== undefined && codeStyle.keepTogether !== D.keepTogether) out.keepTogether = codeStyle.keepTogether;
   if (codeStyle.splitMinLines !== undefined && codeStyle.splitMinLines !== D.splitMinLines) out.splitMinLines = codeStyle.splitMinLines;
   if (codeStyle.repeatTitle !== undefined && codeStyle.repeatTitle !== D.repeatTitle) out.repeatTitle = codeStyle.repeatTitle;

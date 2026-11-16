@@ -1,9 +1,9 @@
 // The keys each settings object has, checked against its type, and the
 // warning for a key it does not have (#1276: split out of configWarnings.ts).
-import type { HeadingsConfig, ColumnBalancingConfig, HeadingLevelConfig, HeadingStyleConfig, ParagraphStyleConfig, ParagraphDropCap, DropCapLeadIn, TabStop, CanvasViewerConfig, ChecksConfig, ContentInConfigCheckConfig, LineNumbersConfig, CodeStyleConfig, CodeTokenStyle, InlineCodeStyleConfig, ComicsConfig, PanelStyleConfig, NamedPanelStyleConfig, LetteringConfig, BalloonStyleConfig, ComicCastMember, PostextConfig } from '../../types.js';
+import type { HeadingsConfig, ColumnBalancingConfig, HeadingLevelConfig, HeadingStyleConfig, ParagraphStyleConfig, ParagraphDropCap, DropCapLeadIn, TabStop, CanvasViewerConfig, ChecksConfig, ContentInConfigCheckConfig, LineNumbersConfig, CodeStyleConfig, CodeTokenStyle, CodeLineKindStyle, InlineCodeStyleConfig, ComicsConfig, PanelStyleConfig, NamedPanelStyleConfig, LetteringConfig, BalloonStyleConfig, ComicCastMember, PostextConfig } from '../../types.js';
 import type { ConfigWarning } from '../../vdt.js';
 import { type UnknownKey, unknownKeysOf, CONFIG_KEYS, DOTTED_PATH } from '../../design/elementKeys.js';
-import { CODE_TOKEN_KINDS } from '../../defaults/text/codeStyle.js';
+import { CODE_LINE_KINDS, CODE_TOKEN_KINDS } from '../../defaults/text/codeStyle.js';
 import { closestKey } from '../../util/closestKey.js';
 import { tabStopLists, dropCapSettings } from './choices.js';
 
@@ -71,10 +71,12 @@ const CODE_STYLE_KEYS = {
   lineHeight: true, snapToGrid: true, color: true, backgroundEnabled: true, background: true, padding: true,
   border: true, borderRadius: true, marginTop: true, marginBottom: true, span: true, tabSize: true, overflow: true,
   wrapIndent: true, wrapMarker: true, minFontScale: true, lineNumbers: true, lineNumberColor: true,
-  lineNumberGap: true, highlightBackground: true, annotations: true, highlightBold: true, keepTogether: true, splitMinLines: true, repeatTitle: true,
+  lineNumberGap: true, highlightBackground: true, annotations: true, highlightBold: true, lineKinds: true, keepTogether: true, splitMinLines: true, repeatTitle: true,
   continuesMarkerEnabled: true, continuesMarker: true, titleStyle: true, label: true, highlight: true, tokens: true,
   inline: true,
 } satisfies Record<keyof CodeStyleConfig, true>;
+const CODE_LINE_KIND_STYLE_KEYS = { background: true, marker: true, bold: true, prefix: true, prefixColor: true } satisfies Record<keyof CodeLineKindStyle, true>;
+const CODE_LINE_KIND_KEYS: Record<string, true> = Object.fromEntries(CODE_LINE_KINDS.map((k) => [k, true]));
 const CODE_TOKEN_STYLE_KEYS = { color: true, bold: true, italic: true } satisfies Record<keyof CodeTokenStyle, true>;
 const INLINE_CODE_KEYS = {
   fontFamily: true, fontSize: true, color: true, bold: true, italic: true, background: true, borderColor: true,
@@ -169,6 +171,12 @@ export function collectUnknownKeyWarnings(config: PostextConfig): ConfigWarning[
     if (c.tokens && typeof c.tokens === 'object') {
       for (const [kind, look] of Object.entries(c.tokens)) {
         if (CODE_TOKEN_KIND_KEYS[kind]) check(look, CODE_TOKEN_STYLE_KEYS, `codeStyle.tokens.${kind}`);
+      }
+    }
+    check(c.lineKinds, CODE_LINE_KIND_KEYS, 'codeStyle.lineKinds');
+    if (c.lineKinds && typeof c.lineKinds === 'object') {
+      for (const [kind, look] of Object.entries(c.lineKinds)) {
+        if (CODE_LINE_KIND_KEYS[kind]) check(look, CODE_LINE_KIND_STYLE_KEYS, `codeStyle.lineKinds.${kind}`);
       }
     }
     check(c.inline, INLINE_CODE_KEYS, 'codeStyle.inline');

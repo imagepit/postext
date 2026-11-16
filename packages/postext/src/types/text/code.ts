@@ -133,6 +133,10 @@ export interface CodeStyleConfig {
   /** Set the lines a fence's `highlight="3,5-7"` names in bold
    *  (CORE-213). Default `false`. */
   highlightBold?: boolean;
+  /** The look of the lines a fence marks by kind (CORE-230):
+   *  `add="2"`, `del="4-5"`, `focus`, `error`, `warning`, each with the
+   *  line numbers `highlight` takes. Unset kinds are set plain. */
+  lineKinds?: Partial<Record<CodeLineKind, CodeLineKindStyle>>;
   /** Default `false`: a listing splits between lines across columns and
    *  pages. */
   keepTogether?: boolean;
@@ -161,6 +165,36 @@ export interface CodeStyleConfig {
   /** Inline code in a code face. Unset: inline code is set in the body
    *  face, as before #624. */
   inline?: InlineCodeStyleConfig;
+}
+
+/** A kind of line a fence marks (CORE-230), after the design system's
+ *  `//addstart`… markers: an added or deleted line, one to focus on, an
+ *  error, a warning. */
+export type CodeLineKind = 'add' | 'del' | 'focus' | 'error' | 'warning';
+
+/** How the lines of one kind are set. */
+export interface CodeLineKindStyle {
+  /** The band behind the line, across the box. Unset: none. */
+  background?: ColorValue;
+  /** A thin rule at the band's left edge. Unset: none. */
+  marker?: ColorValue;
+  /** Set the line in bold. Default `false`. */
+  bold?: boolean;
+  /** Set before the line in the code face, out of the copied text
+   *  (`'+'`, `'-'`). When a listing has a line of a kind with a prefix,
+   *  every line gets the prefix column (blank where it has none), so the
+   *  code keeps its columns and indents. Unset: none. */
+  prefix?: string;
+  /** The prefix's colour. Unset: the code's. */
+  prefixColor?: ColorValue;
+}
+
+export interface ResolvedCodeLineKindStyle {
+  background?: ColorValue;
+  marker?: ColorValue;
+  bold: boolean;
+  prefix?: string;
+  prefixColor?: ColorValue;
 }
 
 /** The look of inline code with every default filled in. */
@@ -210,6 +244,8 @@ export interface ResolvedCodeStyleConfig {
   highlightBackground: ColorValue;
   annotations: boolean;
   highlightBold: boolean;
+  /** As written, with `bold` filled in; only the kinds the config sets. */
+  lineKinds: Partial<Record<CodeLineKind, ResolvedCodeLineKindStyle>>;
   keepTogether: boolean;
   splitMinLines: number;
   repeatTitle: boolean;

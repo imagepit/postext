@@ -36,10 +36,21 @@ export interface BoxDecorationDeps {
   innerWidth: number;
   overlayBlocks: VDTDesignBlock[];
   groupRules: VDTDesignBlock[];
-  highlights: { y: number; height: number }[];
+  highlights: { y: number; height: number; kind?: import('../../../types.js').CodeLineKind; highlight?: boolean }[];
   contentBottom: number;
   boxHeight: number;
   boxState: CalloutState;
+}
+
+/** A colour darker than mid grey (relative luminance, sRGB). */
+function isDarkHex(hex: string): boolean {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex);
+  if (!m) return false;
+  const lin = (c: string) => {
+    const v = parseInt(c, 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(m[1]!) + 0.7152 * lin(m[2]!) + 0.0722 * lin(m[3]!) < 0.18;
 }
 
 export function createBoxDecoration(deps: BoxDecorationDeps) {
@@ -83,13 +94,34 @@ export function createBoxDecoration(deps: BoxDecorationDeps) {
   // The highlighted lines of a listing (#624): a band across the inner
   // area and its padding, under the text.
   if (highlights.length > 0) {
-    const tint = resolvedCodeStyle(input.resolved).highlightBackground.hex;
+    const cs = resolvedCodeStyle(input.resolved);
+    const tint = cs.highlightBackground.hex;
+    // A line marked by kind (CORE-230) takes its kind's band and rule;
+    // a kind with no band leaves a highlighted line its highlight tint.
+    const ruleW = px({ value: 1.5, unit: 'pt' });
+    // On a dark ground (a terminal's) a kind's pale band would hide the light
+    // text: the kind keeps its rule and prefix, without the band.
+    // The ground is the box's own background, else what it sits on.
+    const ground = style.backgroundEnabled ? style.background.hex : input.ground;
+    const dark = ground !== undefined && isDarkHex(ground);
     for (const h of highlights) {
-      overlayBlocks.push({
-        kind: 'box',
-        bbox: createBoundingBox(innerX - padL, h.y, innerWidth + padL + padR, h.height),
-        box: { backgroundColor: tint, borderWidthPx: 0, borderRadiusPx: 0 },
-      });
+      const look = h.kind ? cs.lineKinds[h.kind] : undefined;
+      const band = (dark && look?.background ? undefined : look?.background?.hex) ?? (h.highlight ? tint : undefined);
+      const x = innerX - padL;
+      if (band) {
+        overlayBlocks.push({
+          kind: 'box',
+          bbox: createBoundingBox(x, h.y, innerWidth + padL + padR, h.height),
+          box: { backgroundColor: band, borderWidthPx: 0, borderRadiusPx: 0 },
+        });
+      }
+      if (look?.marker) {
+        overlayBlocks.push({
+          kind: 'box',
+          bbox: createBoundingBox(x, h.y, ruleW, h.height),
+          box: { backgroundColor: look.marker.hex, borderWidthPx: 0, borderRadiusPx: 0 },
+        });
+      }
     }
   }
   boxState.stripeBlock = undefined;

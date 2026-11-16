@@ -317,7 +317,7 @@ export function layoutCallout(input: CalloutLayoutInput): CalloutLayoutResult {
   const groupRules: VDTDesignBlock[] = [];
   /** The lines of the box's code listing a fence highlights (#624),
    *  box-relative. */
-  const highlights: { y: number; height: number }[] = [];
+  const highlights: { y: number; height: number; kind?: import('../../../types.js').CodeLineKind; highlight?: boolean }[] = [];
   const nestPath = input.nestPath && input.nestPath.length > 0 ? input.nestPath : undefined;
   const columnGapPx = px(style.columnGap);
   /** A `:::space` between children: body lines of the box's own type.
