@@ -138,12 +138,14 @@ git diff --stat v1.82.0 imagepit-v1.82.0 -- packages
 
 | ファイル | 中身 | PR |
 |---|---|---|
-| `apps/books/` | 書籍アプリ。データベース保存、Outline取り込み、版、デザインの保存、R2の資産 | #1〜#17 |
-| `Dockerfile.imagepit` | `apps/books` のamd64イメージ。起動時にマイグレーションを適用する | #1・#2・#15・#17 |
+| `apps/books/` | 書籍アプリ。データベース保存、Outline取り込みと書き戻し、版、デザインの保存、R2の資産、PDF・EPUBの出力（`src/export/`）。`fonts/` は出力で記号を補う Noto Sans JP（OFL 1.1） | #1〜#22、CORE-206 |
+| `Dockerfile.imagepit` | `apps/books` のamd64イメージ。起動時にマイグレーションを適用する。出力用に postext CLI の linux-x64 の単体実行ファイル（`/app/bin/postext`）とフォント（`/app/fonts`）を入れる | #1・#2・#15・#17、CORE-206 |
 | `.dockerignore` | イメージのビルドに要らないものを外す | #1 |
 | `.github/workflows/imagepit-image.yml` | イメージのビルドと起動確認 | #1 |
 | `IMAGEPIT.md` | フォークの方針と追従の手順 | #1 |
 | `IMAGEPIT-PATCHES.md` | この一覧 | このファイルを足したPR |
+
+上流の `packages/postext-cli/scripts/build-bin.ts`（単体実行ファイルの作り方）が変わったら、`Dockerfile.imagepit` の CLI を作る行を合わせる（CORE-206）。
 
 このほか、ワークスペースの設定を2つ変えています。
 
