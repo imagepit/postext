@@ -75,6 +75,44 @@ export function createMcpServer(deps: ToolDeps): McpServer {
     async (a) => asContent(await tools.replaceText(deps, a.bookId, a.find, a.replace, a.baseRevision, a.chapter)),
   );
   server.registerTool(
+    "list_resources",
+    {
+      title: "画像・表の一覧",
+      description:
+        "書籍のリソース（画像・表など）の ID・種類・使っている章・キャプション・置き方・幅（本文幅に対する%）・揃えを返す。chapter や kind（bitmap・svg・table など）で絞れる。",
+      inputSchema: { bookId, chapter: chapter.optional(), kind: z.string().optional() },
+      annotations: { readOnlyHint: true },
+    },
+    async (a) => asContent(await tools.listResources(deps, a.bookId, a.chapter, a.kind)),
+  );
+  server.registerTool(
+    "set_resource_placement",
+    {
+      title: "画像の幅・揃え・キャプションを変える",
+      description:
+        "リソースの幅（本文幅に対する %、1〜100。null で外して幅いっぱい）・揃え（left・center・right。null で外す）・置き方・キャプション（null か空で外す）を変えて保存する。渡した項目だけを変える。baseRevision の扱いは write_chapter と同じ。",
+      inputSchema: {
+        bookId,
+        resourceId: z.string().min(1).describe("リソースの ID（list_resources で分かる）"),
+        widthPercent: z.number().min(1).max(100).nullable().optional(),
+        align: z.enum(["left", "center", "right"]).nullable().optional(),
+        position: z.enum(["here", "top", "bottom", "auto", "paragraph"]).optional(),
+        caption: z.string().nullable().optional(),
+        baseRevision,
+      },
+      annotations: { destructiveHint: true },
+    },
+    async (a) => {
+      const change: tools.PlacementChange = {
+        ...(a.widthPercent !== undefined ? { widthPercent: a.widthPercent } : {}),
+        ...(a.align !== undefined ? { align: a.align } : {}),
+        ...(a.position !== undefined ? { position: a.position } : {}),
+        ...(a.caption !== undefined ? { caption: a.caption } : {}),
+      };
+      return asContent(await tools.setResourcePlacement(deps, a.bookId, a.resourceId, change, a.baseRevision));
+    },
+  );
+  server.registerTool(
     "create_version",
     {
       title: "版を作る",

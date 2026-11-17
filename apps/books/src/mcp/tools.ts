@@ -134,6 +134,113 @@ export async function replaceText(
   return saved.ok ? { ...saved, replaced } : saved;
 }
 
+/** 本文の `::resource{id="…"}` から、リソースの ID を取り出す。 */
+const RESOURCE_REF = /::resource\{[^}]*?\bid=(?:"([^"]*)"|'([^']*)'|([^\s}]+))/g;
+
+function chaptersUsing(book: Book): Map<string, number[]> {
+  const used = new Map<string, number[]>();
+  book.chapters.forEach((c, i) => {
+    for (const m of c.markdown.matchAll(RESOURCE_REF)) {
+      const id = m[1] ?? m[2] ?? m[3]!;
+      const list = used.get(id) ?? [];
+      if (!list.includes(i + 1)) list.push(i + 1);
+      used.set(id, list);
+    }
+  });
+  return used;
+}
+
+type Placement = { position?: unknown; width?: unknown; align?: unknown; span?: unknown };
+
+/** 幅を、本文幅に対する百分率の整数で返す（設定がなければ undefined＝幅いっぱい）。 */
+const widthPercent = (p: Placement): number | undefined => (typeof p.width === "number" ? Math.round(p.width * 100) : undefined);
+
+export async function listResources(deps: ToolDeps, bookId: string, chapter?: number, kind?: string): Promise<ToolResult> {
+  const book = await deps.repo.get(bookId);
+  if (!book) return notFound(bookId);
+  if (chapter !== undefined && !chapterAt(book, chapter)) return badChapter(book, chapter);
+  const used = chaptersUsing(book);
+  const resources = book.resources
+    .map((r) => {
+      const placement = (r.placement ?? {}) as Placement;
+      const width = widthPercent(placement);
+      return {
+        id: String(r.id),
+        kind: String(r.kind ?? ""),
+        type: typeof r.typeId === "string" ? r.typeId : undefined,
+        chapters: used.get(String(r.id)) ?? [],
+        ...(typeof r.caption === "string" ? { caption: r.caption } : {}),
+        ...(typeof placement.position === "string" ? { position: placement.position } : {}),
+        ...(width !== undefined ? { widthPercent: width } : {}),
+        ...(typeof placement.align === "string" ? { align: placement.align } : {}),
+      };
+    })
+    .filter((r) => (chapter === undefined || r.chapters.includes(chapter)) && (kind === undefined || r.kind === kind));
+  return { ok: true, revision: book.revision, total: resources.length, resources };
+}
+
+export interface PlacementChange {
+  /** 本文幅に対する百分率（1〜100）。null で設定を外す（幅いっぱい）。 */
+  widthPercent?: number | null;
+  /** 幅より狭いときの揃え。null で設定を外す（既定は左）。 */
+  align?: "left" | "center" | "right" | null;
+  /** 置き方。 */
+  position?: "here" | "top" | "bottom" | "auto" | "paragraph";
+  /** キャプション。null か空で外す。 */
+  caption?: string | null;
+}
+
+export async function setResourcePlacement(
+  deps: ToolDeps,
+  bookId: string,
+  resourceId: string,
+  change: PlacementChange,
+  baseRevision: number,
+): Promise<ToolResult> {
+  const book = await deps.repo.get(bookId);
+  if (!book) return notFound(bookId);
+  if (book.revision !== baseRevision) return conflict(book.revision);
+  const at = book.resources.findIndex((r) => r.id === resourceId);
+  if (at < 0) return fail("resource_not_found", `リソース ${resourceId} はこの書籍にありません。list_resources で ID を確かめてください。`);
+  if (Object.keys(change).length === 0) return fail("no_change", "変える項目（widthPercent・align・position・caption）を1つ以上渡してください。");
+  if (change.widthPercent !== undefined && change.widthPercent !== null && !(change.widthPercent >= 1 && change.widthPercent <= 100)) {
+    return fail("bad_width", "widthPercent は 1〜100 で指定してください（幅を外すときは null）。");
+  }
+  const resource = { ...book.resources[at]! };
+  const placement: Record<string, unknown> = { ...((resource.placement ?? {}) as Record<string, unknown>) };
+  if (change.widthPercent === null || change.widthPercent === 100) delete placement.width;
+  else if (change.widthPercent !== undefined) placement.width = Math.round(change.widthPercent) / 100;
+  if (change.align === null) delete placement.align;
+  else if (change.align !== undefined) placement.align = change.align;
+  if (change.position !== undefined) placement.position = change.position;
+  resource.placement = placement;
+  if (change.caption === null || change.caption === "") delete resource.caption;
+  else if (change.caption !== undefined) resource.caption = change.caption;
+  if (resource.updatedAt !== undefined) resource.updatedAt = Date.now();
+  const saved = await saveBook(deps.repo, book.id, baseRevision, {
+    title: book.title,
+    config: book.config,
+    resources: book.resources.map((r, i) => (i === at ? resource : r)),
+    chapters: book.chapters,
+    ...(book.locale !== undefined ? { locale: book.locale } : {}),
+    sharedConfig: book.sharedConfig ?? null,
+    editions: book.editions ?? [],
+  });
+  if (!saved.ok) return saved.reason === "conflict" ? conflict(saved.revision) : notFound(book.id);
+  const width = widthPercent(placement as Placement);
+  return {
+    ok: true,
+    revision: saved.revision,
+    resource: {
+      id: resourceId,
+      ...(typeof resource.caption === "string" ? { caption: resource.caption } : {}),
+      ...(typeof placement.position === "string" ? { position: placement.position } : {}),
+      ...(width !== undefined ? { widthPercent: width } : {}),
+      ...(typeof placement.align === "string" ? { align: placement.align } : {}),
+    },
+  };
+}
+
 export async function makeVersion(deps: ToolDeps, bookId: string, label: string): Promise<ToolResult> {
   const created = await createVersion(deps.repo, bookId, label);
   if (!created.ok) return notFound(bookId);

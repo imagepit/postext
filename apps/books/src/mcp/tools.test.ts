@@ -123,6 +123,63 @@ describe("MCP のツール", () => {
   });
 });
 
+describe("画像の一覧と配置", () => {
+  async function seedWithImages() {
+    return repo.create({
+      title: "画像の本",
+      config: {},
+      locale: "ja",
+      resources: [
+        { id: "outline-img-a", kind: "bitmap", typeId: "figure", caption: "構成図", createdAt: 0, updatedAt: 0, placement: { position: "here", width: 0.65 } },
+        { id: "fig-b", kind: "svg", typeId: "image", createdAt: 0, updatedAt: 0, placement: { position: "here" } },
+        { id: "tbl", kind: "table", typeId: "table", caption: "表", createdAt: 0, updatedAt: 0 },
+      ],
+      chapters: [
+        { title: "1", locale: "ja", markdown: '# 1\n\n::resource{id="outline-img-a"}\n\n::resource{id="tbl"}\n' },
+        { title: "2", locale: "ja", markdown: '# 2\n\n::resource{id="fig-b"}\n\n::resource{id="outline-img-a"}\n' },
+      ],
+    });
+  }
+
+  it("リソースの ID・種類・使っている章・幅・キャプションを返し、章と種類で絞れる", async () => {
+    const book = await seedWithImages();
+    const all = await tools.listResources(deps(), book.id);
+    expect(all).toMatchObject({
+      ok: true,
+      total: 3,
+      resources: [
+        { id: "outline-img-a", kind: "bitmap", chapters: [1, 2], caption: "構成図", position: "here", widthPercent: 65 },
+        { id: "fig-b", kind: "svg", chapters: [2] },
+        { id: "tbl", kind: "table", chapters: [1], caption: "表" },
+      ],
+    });
+    expect((await tools.listResources(deps(), book.id, 2)).total).toBe(2);
+    expect((await tools.listResources(deps(), book.id, undefined, "table")).resources).toMatchObject([{ id: "tbl" }]);
+  });
+
+  it("幅・揃え・キャプションを、渡した項目だけ変えて保存する。外すことも、競合の検出もできる", async () => {
+    const book = await seedWithImages();
+    const d = deps();
+    const set = await tools.setResourcePlacement(d, book.id, "fig-b", { widthPercent: 50, align: "center", caption: "新しい図" }, book.revision);
+    expect(set).toMatchObject({ ok: true, revision: book.revision + 1, resource: { id: "fig-b", widthPercent: 50, align: "center", caption: "新しい図", position: "here" } });
+    const saved = (await repo.get(book.id))!.resources.find((r) => r.id === "fig-b")!;
+    expect(saved.placement).toEqual({ position: "here", width: 0.5, align: "center" });
+    // 幅だけを外すと、揃えとキャプションは残る。
+    await tools.setResourcePlacement(d, book.id, "fig-b", { widthPercent: null }, book.revision + 1);
+    const again = (await repo.get(book.id))!.resources.find((r) => r.id === "fig-b")!;
+    expect(again.placement).toEqual({ position: "here", align: "center" });
+    expect(again.caption).toBe("新しい図");
+    // 古い revision、ないリソース、空の変更、範囲外の幅は保存しない。
+    expect(await tools.setResourcePlacement(d, book.id, "fig-b", { align: "left" }, book.revision)).toMatchObject({ ok: false, error: "conflict" });
+    expect(await tools.setResourcePlacement(d, book.id, "nope", { align: "left" }, book.revision + 2)).toMatchObject({ ok: false, error: "resource_not_found" });
+    expect(await tools.setResourcePlacement(d, book.id, "fig-b", {}, book.revision + 2)).toMatchObject({ ok: false, error: "no_change" });
+    expect(await tools.setResourcePlacement(d, book.id, "fig-b", { widthPercent: 150 }, book.revision + 2)).toMatchObject({ ok: false, error: "bad_width" });
+    expect((await repo.get(book.id))!.revision).toBe(book.revision + 2);
+    // 本文はそのまま。
+    expect((await repo.get(book.id))!.chapters).toEqual(book.chapters);
+  });
+});
+
 describe("MCP サーバー", () => {
   it("ツールを登録し、クライアントから呼べる", async () => {
     const book = await seed();
@@ -131,7 +188,9 @@ describe("MCP サーバー", () => {
     const [a, b] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(a), client.connect(b)]);
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(["create_version", "export_book", "get_book", "list_books", "read_chapter", "replace_text", "search_text", "write_chapter"]);
+    expect(names).toEqual([
+      "create_version", "export_book", "get_book", "list_books", "list_resources", "read_chapter", "replace_text", "search_text", "set_resource_placement", "write_chapter",
+    ]);
     const res = await client.callTool({ name: "read_chapter", arguments: { bookId: book.id, chapter: 2 } });
     const body = JSON.parse((res.content as { text: string }[])[0]!.text);
     expect(body).toMatchObject({ ok: true, title: "第2章" });
