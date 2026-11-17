@@ -5,7 +5,11 @@ RUN corepack enable
 WORKDIR /repo
 COPY . .
 RUN pnpm install --frozen-lockfile
-RUN pnpm exec turbo run build --filter=books
+RUN pnpm exec turbo run build --filter=books --filter='postext-cli^...'
+# CORE-206: 書籍のPDF・EPUBをサーバーで作るため、postext CLI の linux-x64 の単体実行ファイルを作る。
+# エンジンと描画（Skia・resvg）と既定のフォントが1ファイルに入る。ネイティブの部品は npm の登録所から取る。
+RUN pnpm --dir packages/postext-cli exec bun scripts/build-bin.ts linux-x64 \
+ && mkdir -p /cli && cp packages/postext-cli/bin/postext-linux-x64 /cli/postext && chmod 755 /cli/postext
 # standalone 出力には migrator が入らないので、pg と drizzle-orm ごと1ファイルにまとめて持ち込む。
 # pg-native は pg が任意で読む依存で、無くても動く。
 RUN pnpm --dir apps/books exec esbuild src/db/migrate.ts --bundle --platform=node --format=cjs \
@@ -18,6 +22,10 @@ COPY --from=build --chown=node:node /repo/apps/books/.next/standalone ./
 COPY --from=build --chown=node:node /repo/apps/books/.next/static ./apps/books/.next/static
 COPY --from=build --chown=node:node /migrate/migrate.cjs ./migrate.cjs
 COPY --from=build --chown=node:node /repo/apps/books/drizzle ./drizzle
+# 出力に使う CLI と、本に入っていない字（→ ▼ ✓ ① など）を補うフォント（Noto Sans JP、OFL 1.1）。
+COPY --from=build --chown=node:node /cli/postext ./bin/postext
+COPY --chown=node:node apps/books/fonts ./fonts
+ENV POSTEXT_CLI_PATH=/app/bin/postext POSTEXT_FONT_DIR=/app/fonts
 USER node
 EXPOSE 3000
 # DATABASE_URL があれば未適用のマイグレーションを適用してから起動する。無ければ migrate.cjs は何もしない。
