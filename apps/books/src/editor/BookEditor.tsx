@@ -24,6 +24,28 @@ const messageOf = (error: unknown, notFound = "書籍が見つかりません"):
   return "通信できませんでした";
 };
 
+/** URL の ?chapter=<番号> の章へ、最初に開いたときだけ移る（CORE-229: Outline の「書籍出版」の章のリンク）。 */
+let chapterOpened = false;
+async function openRequestedChapter(): Promise<void> {
+  if (chapterOpened || typeof window === "undefined") return;
+  chapterOpened = true;
+  const chapter = Number(new URLSearchParams(window.location.search).get("chapter"));
+  if (!Number.isInteger(chapter) || chapter < 1) return;
+  // 組版が始まるまで、少し待ってから何度か試す。
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const webMcp = (window as unknown as { postextWebMcp?: { executeTool: (name: string, args: object) => Promise<unknown> } }).postextWebMcp;
+    try {
+      if (webMcp) {
+        await webMcp.executeTool("sandbox_go_to_page", { chapter, position: 1 });
+        return;
+      }
+    } catch {
+      // 組版の前は失敗するので、待ってやり直す。
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
 export function BookEditor({ bookId, labels }: { bookId: string; labels: SandboxLabels }) {
   const [state, setState] = useState<SaveState>(initialState);
   const stateRef = useRef<SaveState>(initialState);
@@ -62,7 +84,10 @@ export function BookEditor({ bookId, labels }: { bookId: string; labels: Sandbox
               const bytes = new Uint8Array(await response.arrayBuffer());
               // 開くたびに同じ origin の古いプロジェクトを消し、常にサーバーの内容で始める。
               await bridgeRef.current!.openBundle(bytes, { origin: `book:${bookId}` });
-              if (generation === generationRef.current) dispatch({ type: "loaded", revision });
+              if (generation === generationRef.current) {
+                dispatch({ type: "loaded", revision });
+                void openRequestedChapter();
+              }
             } catch (error) {
               if (generation === generationRef.current) dispatch({ type: "loadFailed", message: messageOf(error) });
             }

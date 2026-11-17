@@ -33,6 +33,8 @@ export interface ApplyInput {
   parentId: string;
   /** 適用する子文書。 */
   documentIds: string[];
+  /** true なら、書籍側でも編集された章（両方で変更）を取り込まない（CORE-229 の書籍出版。Postext を優先する）。 */
+  protectBookEdits?: boolean;
 }
 
 export interface ApplyResult {
@@ -174,7 +176,7 @@ export async function applyImport(
   for (const [k, doc] of docs.entries()) {
     if (!wanted.has(doc.id)) continue;
     const status = statusOf.get(doc.id)!;
-    if (!APPLICABLE.has(status)) {
+    if (!APPLICABLE.has(status) || (input.protectBookEdits && status === "both")) {
       warnings.push(`${doc.title}: 取り込み対象外の状態（${status}）のためスキップしました`);
       continue;
     }
