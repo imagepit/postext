@@ -36,7 +36,8 @@ async function openRequestedChapter(): Promise<void> {
     const webMcp = (window as unknown as { postextWebMcp?: { executeTool: (name: string, args: object) => Promise<unknown> } }).postextWebMcp;
     try {
       if (webMcp) {
-        await webMcp.executeTool("sandbox_go_to_page", { chapter, position: 1 });
+        // 章だけを渡すと、偶数ページ合わせの空白を飛ばした中身のある最初のページを開く。
+        await webMcp.executeTool("sandbox_go_to_page", { chapter });
         return;
       }
     } catch {
