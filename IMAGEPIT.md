@@ -46,6 +46,17 @@ docker run --rm -p 3000:3000 imagepit/postext:local
 
 `.github/workflows/imagepit-image.yml` は、既定ブランチへのpushとPull Requestで同じビルドを行い、コンテナを起動して `/api/health` と `/` を確かめます。Docker Hubへの発行と配備は imagepit/imagepit リポジトリのワークフローが行います。
 
+## 端末のAIから使うMCP
+
+`apps/books` は、端末の Claude Code・Codex CLI 向けに MCP を持つ（CORE-203）。上流の WebMCP（ブラウザーの中のエージェント用）とは別のもので、上流のコードは変えていない。
+
+- 入口は `apps/books/src/app/mcp/route.ts`（Streamable HTTP、セッションなし、JSON 応答）。ツールは `src/mcp/tools.ts`、登録は `src/mcp/server.ts`。
+- ツール: `list_books`・`get_book`・`read_chapter`・`search_text`・`write_chapter`・`replace_text`・`list_resources`・`set_resource_placement`（画像の幅・揃え・キャプション）・`create_version`・`export_book`。書き込みは読んだときの revision を受け取り、編集画面と同じ `saveBook` を通す。
+- `export_book` の生成物は1時間だけ置き、`/mcp/exports/<exportId>` で返す。
+- 認証は `Authorization: Bearer` のキー（環境変数 `POSTEXT_MCP_KEY`）。本番では `book-mcp.image-pit.com` の `/mcp` だけを公開し、Cloudflare Access のサービストークンも要る。
+- 編集画面は15秒ごとに `/api/books/<id>/revision` を確かめ、AI などが先に保存したら読み込み直すか知らせる。
+- 接続の設定と起動役は、imagepit リポジトリの `claude-env/README.md`（Postext MCP）と `infra/postext/README.md` にある。
+
 ## 上流の新しい版へ追従する
 
 上流から変えた箇所と、版を上げるときに衝突しやすい点・確かめることは [IMAGEPIT-PATCHES.md](IMAGEPIT-PATCHES.md) にまとめています。追従の前に読みます。

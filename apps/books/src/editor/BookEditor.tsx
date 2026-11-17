@@ -9,6 +9,8 @@ import { initialState, statusText, transition } from "./saveState";
 import type { SaveEffect, SaveEvent, SaveState } from "./saveState";
 
 // ページを離れる直前の fetch は keepalive でないと途中で切られるが、本文が 64KB を超えると使えない。
+// AI（MCP）などが先に保存したかを確かめる間隔（CORE-203）。
+const REMOTE_CHECK_MS = 15_000;
 const KEEPALIVE_LIMIT = 60_000;
 
 class HttpError extends Error {
@@ -34,6 +36,8 @@ export function BookEditor({ bookId, labels }: { bookId: string; labels: Sandbox
   const dispatchRef = useRef<(event: SaveEvent) => void>(() => undefined);
   const [importing, setImporting] = useState(false);
   const [pushing, setPushing] = useState(false);
+  // 画面に未保存の編集があるうちに、別の場所（AI など）で保存されたこと。
+  const [remoteSaved, setRemoteSaved] = useState(false);
 
   const run = useCallback(
     (effect: SaveEffect) => {
@@ -110,6 +114,39 @@ export function BookEditor({ bookId, labels }: { bookId: string; labels: Sandbox
     run({ type: "fetch" });
   }, [run]);
 
+  // 別の場所で保存された新しい revision を見つけたら、未保存の編集がなければ読み込み直し、あれば知らせる（CORE-203）。
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const current = stateRef.current;
+      if (current.kind !== "saved" && current.kind !== "dirty") return;
+      if (document.visibilityState === "hidden") return;
+      void (async () => {
+        try {
+          const response = await fetch(`/api/books/${bookId}/revision`, { cache: "no-store" });
+          if (!response.ok) return;
+          const { revision } = (await response.json()) as { revision: number };
+          const now = stateRef.current;
+          if (!("revision" in now) || revision <= now.revision) return;
+          if (now.kind === "saved") {
+            setRemoteSaved(false);
+            stateRef.current = { kind: "loading" };
+            setState(stateRef.current);
+            run({ type: "fetch" });
+          } else {
+            setRemoteSaved(true);
+          }
+        } catch {
+          // 確かめられなかったときは、次の回に任せる。
+        }
+      })();
+    }, REMOTE_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [bookId, run]);
+
+  useEffect(() => {
+    if (state.kind === "loading") setRemoteSaved(false);
+  }, [state.kind]);
+
   const onBridgeReady = useCallback(
     (bridge: SandboxBookBridge) => {
       bridgeRef.current = bridge;
@@ -181,6 +218,11 @@ export function BookEditor({ bookId, labels }: { bookId: string; labels: Sandbox
         >
           Outlineへ反映
         </button>
+        {remoteSaved && state.kind !== "conflict" && (
+          <span role="alert" data-testid="remote-saved" className="text-vermilion">
+            AIなどが先に保存しました。この画面の編集は保存のときに競合になるので、「最新版を読み込む」で読み込み直してください
+          </span>
+        )}
         {state.kind === "conflict" && (
           <button
             type="button"
