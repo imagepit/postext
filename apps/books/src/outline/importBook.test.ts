@@ -196,6 +196,21 @@ describe("Outline の取り込み", () => {
     expect(readProvenance(replaced.markdown)?.updatedAt).toBe(T1);
   });
 
+  it("protectBookEdits を付けると、両方で変更した章は取り込まず書籍側の編集が残る（CORE-229）", async () => {
+    const book = await createBook(repo, draft());
+    const outline = new FakeOutline([docB()]);
+    await applyImport(repo, book.id, { baseRevision: 0, parentId: PARENT, documentIds: [docB().id] }, outline);
+    const current = await load(book.id);
+    const chapters = current.chapters.map((c) => (c.title === "次の章" ? { ...c, markdown: c.markdown + "追記\n" } : c));
+    await saveBook(repo, book.id, current.revision, { ...current, chapters, assets: undefined });
+    outline.docs = [docB("本文B 新\n", T1)];
+    const applied = await applyImport(repo, book.id, { baseRevision: 2, parentId: PARENT, documentIds: [docB().id], protectBookEdits: true }, outline);
+    expect(applied.ok && applied.warnings.some((w) => w.includes("both"))).toBe(true);
+    const kept = (await load(book.id)).chapters.find((c) => c.title === "次の章")!;
+    expect(kept.markdown).toContain("追記");
+    expect(kept.markdown).not.toContain("本文B 新");
+  });
+
   it("frontmatter は .postext の往復と Postext の読み取りを生き残る", async () => {
     const book = await createBook(repo, draft());
     const outline = new FakeOutline([docA(), docB()]);
